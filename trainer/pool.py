@@ -147,7 +147,7 @@ class SpotPool:
             self.cond.notify_all()
 
     # --- requests ---------------------------------------------------------
-    def take(self, params, timeout=180):
+    def take(self, params, timeout=900):
         """A solved spot for these settings: from stock, or the next one solved."""
         key = self.want(params)
         deadline = time.monotonic() + timeout

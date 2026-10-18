@@ -120,6 +120,7 @@ kbd {
 }
 .card .s { font-size: 18px; }
 .card.s-s { color: #111; } .card.s-h { color: #d0281e; } .card.s-d { color: #1d5fd1; } .card.s-c { color: #19884a; }
+.loading small { display: block; margin-top: 6px; font-size: 12px; text-align: center; max-width: 360px; }
 .loading {
   position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted);
   background: rgba(15,18,22,.55); border-radius: 12px; font-size: 15px;

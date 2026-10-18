@@ -19,8 +19,8 @@
     <label class="field-label">Игроков за столом</label>
     <div class="seg" id="setPlayers">
       <button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
-      <button data-v="6" disabled title="скоро">6</button><button data-v="7" disabled title="скоро">7</button>
-      <button data-v="8" disabled title="скоро">8</button><button data-v="9" disabled title="скоро">9</button>
+      <button data-v="6">6</button><button data-v="7">7</button>
+      <button data-v="8">8</button><button data-v="9">9</button>
     </div>
 
     <label class="field-label">Позиция</label>
@@ -77,7 +77,7 @@
         <div class="pot" id="pot"></div>
         <div class="level" id="levelInfo"></div>
       </div>
-      <div class="loading hidden" id="loading">Солвер считает…</div>
+      <div class="loading hidden" id="loading"><div>Солвер считает…<small id="loadingHint"></small></div></div>
     </div>
 
     <div class="actions">

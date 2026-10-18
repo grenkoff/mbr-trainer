@@ -11,6 +11,7 @@ const DIFFICULTY_HINT = {
   mix: "Случайная сложность для каждой раздачи.",
 };
 const DIFF_NAME = { natural: "Как в игре", easy: "Легко", medium: "Средне", hard: "Сложно" };
+const PLAYERS_NAME = Object.fromEntries([3, 4, 5, 6, 7, 8, 9].map((n) => [n, `${n} ${n < 5 ? "игрока" : "игроков"}`]));
 const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша", overcall: "Оверколл" };
 const CLOSE_EV = 0.005; // decisions this close in EV count as correct either way
 const STATS_KEY = "mbr-trainer-stats-v1";
@@ -41,6 +42,7 @@ let current = null;   // spot being shown
 let answered = null;  // {choice, correct, cost} once answered
 let gridMode = "freq";
 let prefetch = null;  // {key, promise}
+let spotSeq = 0;      // id of the latest nextSpot() call
 let overcallsAvailable = true;
 
 /* ---------------- settings UI ---------------- */
@@ -161,21 +163,26 @@ function startPrefetch() {
 }
 
 async function nextSpot() {
+  $("loadingHint").textContent = settings.overcalls && settings.players >= 6
+    ? "С оверколлами на 6–9 игроках первый спот считается до минуты, дальше споты берутся из запаса. " +
+      "Запас можно заполнить заранее: python -m trainer.fill"
+    : "";
   $("loading").classList.remove("hidden");
+  const seq = ++spotSeq;
   try {
-    let spot;
-    if (prefetch && prefetch.key === settingsKey()) {
-      spot = await prefetch.promise;
-    } else {
-      spot = await fetchSpot();
-    }
+    let spot, key;
+    do { // settings may change while a spot is on its way: then fetch one for the new settings
+      key = settingsKey();
+      spot = prefetch && prefetch.key === key ? await prefetch.promise : await fetchSpot();
+    } while (key !== settingsKey());
+    if (seq !== spotSeq) return; // a newer request shows its own spot
     prefetch = null;
     showSpot(spot, null);
     startPrefetch();
   } catch (e) {
-    $("question").innerHTML = `<span style="color:var(--bad)">Ошибка: ${e.message}</span>`;
+    if (seq === spotSeq) $("question").innerHTML = `<span style="color:var(--bad)">Ошибка: ${e.message}</span>`;
   } finally {
-    $("loading").classList.add("hidden");
+    if (seq === spotSeq) $("loading").classList.add("hidden");
   }
 }
 
@@ -245,11 +252,11 @@ function renderTable(spot) {
       felt.appendChild(ch);
     }
     if (seat.position === "BTN") {
-      const d = seatPoint(rel + 0.22, n, 0.78);
+      // beside the seat box on the side facing the middle of the table, clear of the action labels
       const de = document.createElement("div");
       de.className = "dealer";
-      de.style.left = `${d.x}%`;
-      de.style.top = `${d.y}%`;
+      de.style.left = `calc(${p.x}% ${p.x < 50 ? "+" : "-"} ${el.offsetWidth / 2 + 14}px)`;
+      de.style.top = `calc(${p.y}% - 12px)`;
       de.textContent = "D";
       felt.appendChild(de);
     }
@@ -399,10 +406,12 @@ function renderStats() {
     : "Статистика появится после первой раздачи";
   const row = (label, s) =>
     `<div class="stat-row"><span>${label}</span><span>${s.n ? `${s.pct.toFixed(0)}% · ${s.n}` : "—"}</span></div>`;
-  const group = (title, key, names) => {
-    const keys = Object.keys(names);
+  const group = (title, key, names, skipEmpty = false) => {
+    const rows = Object.keys(names)
+      .map((k) => [names[k], summarize(stats.filter((r) => String(r[key]) === k))])
+      .filter(([, s]) => s.n || !skipEmpty);
     return `<div class="stat-group"><div class="title">${title}</div>` +
-      keys.map((k) => row(names[k], summarize(stats.filter((r) => r[key] === k)))).join("") + `</div>`;
+      rows.map(([label, s]) => row(label, s)).join("") + `</div>`;
   };
   const sess = summarize(history);
   $("statsBox").innerHTML = `
@@ -412,7 +421,8 @@ function renderStats() {
     <div class="stat-row"><span>Потеря EV</span><span>${all.loss.toFixed(2)} BI</span></div>
     <div class="stat-row"><span>На раздачу</span><span>${(all.avg * 1000).toFixed(1)} mBI</span></div>
     ${group("По типу решения", "kind", KIND_NAME)}
-    ${group("По сложности", "difficulty", DIFF_NAME)}`;
+    ${group("По сложности", "difficulty", DIFF_NAME)}
+    ${group("По числу игроков", "players", PLAYERS_NAME, true)}`;
 }
 
 function renderHistory() {

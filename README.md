@@ -20,7 +20,7 @@ gcc -O3 -march=native -fopenmp -o build/equity3 csrc/equity3.c && build/equity3 
 ```
 
 Settings:
-- number of players (3–5 for now);
+- number of players (3–9);
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
