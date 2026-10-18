@@ -4,6 +4,7 @@ import random
 
 import numpy as np
 
+from mbr import equity3
 from mbr.pushfold import MEAN_BOUNTY_BI, Solver, Table
 from mbr.ranges import class_combos, class_label, combo_counts
 
@@ -82,57 +83,101 @@ def pick_cards(cls, rng):
 
 
 MAX_ATTEMPTS = 8
+LINE_ATTEMPTS = 3
 
 
 def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, difficulty="medium",
-              model="bounty", seed=None):
+              model="bounty", overcalls=False, seed=None):
     """Generate spots until one has a hand of the requested difficulty."""
+    overcalls = str(overcalls).lower() in ("1", "true", "yes", "on")
+    if overcalls and not equity3.available():
+        raise ValueError("overcalls need the 3-way equity table: build/equity3.f32 (see README)")
+    if kind == "overcall" and not overcalls:
+        raise ValueError("overcall spots need overcalls enabled")
     rng = random.Random(seed)
     for attempt in range(MAX_ATTEMPTS):
-        spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model,
+        spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls,
                           strict=attempt < MAX_ATTEMPTS - 1)
         if spot:
             return spot
 
 
-def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, strict):
+def _kind_fits(kind, i, n):
+    return {"open": i < n - 1, "call": i > 0, "overcall": i > 1}[kind]
+
+
+def pick_line(solver, hero_idx, kind, rng):
+    """Choose (shover, caller) before Hero in proportion to how often equilibrium play produces the line."""
+    cc = combo_counts()
+    cp = {key: solver._caller_stats(*key)[0] for key in solver.call}
+    lines, weights, reach = [], [], 1.0
+    for i in range(hero_idx):
+        ppush = float(solver.push[i] @ cc / cc.sum())
+        folds = 1.0  # players after the shover fold before the caller (or Hero)
+        for j in range(i + 1, hero_idx):
+            if kind == "overcall":
+                lines.append((i, j))
+                weights.append(reach * ppush * folds * cp[i, j])
+            folds *= 1 - cp[i, j]
+        if kind == "call":
+            lines.append((i, None))
+            weights.append(reach * ppush * folds)
+        reach *= 1 - ppush
+    if sum(weights) <= 0:
+        return rng.choice(lines)
+    return rng.choices(lines, weights=weights)[0]
+
+
+def _pick_decision(solver, hero_idx, kind, difficulty, rng, strict):
+    """A line before Hero and a hand of the requested difficulty, or None."""
+    for _ in range(1 if kind == "open" else LINE_ATTEMPTS):
+        shover = caller = None
+        if kind == "open":
+            ev_play, ev_fold = solver.ev["push", hero_idx]
+            freq = solver.push[hero_idx]
+        elif kind == "call":
+            shover, _ = pick_line(solver, hero_idx, kind, rng)
+            ev_play, ev_fold = solver.ev["call", shover, hero_idx]
+            freq = solver.call[shover, hero_idx]
+        else:
+            shover, caller = pick_line(solver, hero_idx, kind, rng)
+            ev_play, ev_fold = solver.ev["over", shover, caller, hero_idx]
+            freq = solver.over[shover, caller, hero_idx]
+        ev_diff = np.asarray(ev_play) - ev_fold
+        cls = pick_hand(ev_diff, difficulty, rng, strict)
+        if cls is not None:
+            return shover, caller, ev_play, ev_fold, ev_diff, freq, cls
+    return None
+
+
+def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, strict):
     n = int(players)
     pos = positions(n)
-    allowed_kinds = {"open", "call"} if kind == "any" else {kind}
-    hero_options = []
-    for i, p in enumerate(pos):
-        if position not in ("any", p):
-            continue
-        for k in allowed_kinds:
-            if (k == "open" and i < n - 1) or (k == "call" and i > 0):
-                hero_options.append((i, k))
+    if kind == "any":
+        allowed_kinds = ["open", "call"] + (["overcall"] if overcalls else [])
+    else:
+        allowed_kinds = [kind]
+    hero_options = [(i, k) for i, p in enumerate(pos) if position in ("any", p)
+                    for k in allowed_kinds if _kind_fits(k, i, n)]
     if not hero_options:
         raise ValueError(f"position {position} cannot face '{kind}' with {n} players")
     hero_idx, kind = rng.choice(hero_options)
     hero_bb = rng.uniform(float(bb_min), float(bb_max))
     (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
     table = build_table(stacks, sb, bb, ante, model)
-    solver = Solver(table).solve()
+    solver = Solver(table, overcalls=overcalls).solve()
 
-    if kind == "open":
-        shover = None
-        ev_play, ev_fold = solver.ev["push", hero_idx]
-        freq = solver.push[hero_idx]
+    # a solved table has more spots: other players in the stack range and other lines before them
+    others = [(i, k) for i, k in hero_options
+              if (i, k) != (hero_idx, kind) and float(bb_min) <= stacks[i] / bb <= float(bb_max)]
+    rng.shuffle(others)
+    for hero_idx, kind in [(hero_idx, kind)] + others:
+        found = _pick_decision(solver, hero_idx, kind, difficulty, rng, strict)
+        if found:
+            break
     else:
-        # choose the shover in proportion to how often equilibrium play produces this line
-        cc = combo_counts()
-        weights, reach = [], 1.0
-        for i in range(hero_idx):
-            ppush = float(solver.push[i] @ cc / cc.sum())
-            weights.append(reach * ppush)
-            reach *= 1 - ppush
-        shover = rng.choices(range(hero_idx), weights=weights)[0] if sum(weights) > 0 else rng.randrange(hero_idx)
-        ev_play, ev_fold = solver.ev["call", shover, hero_idx]
-        freq = solver.call[shover, hero_idx]
-    ev_diff = np.asarray(ev_play) - ev_fold
-    cls = pick_hand(ev_diff, difficulty, rng, strict)
-    if cls is None:
         return None
+    shover, caller, ev_play, ev_fold, ev_diff, freq, cls = found
 
     seats = []
     for i, p in enumerate(pos):
@@ -147,16 +192,21 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
     for i in range(hero_idx):
         if i == shover:
             actions.append({"position": pos[i], "action": "allin", "amount_bb": seats[i]["stack_bb"]})
+        elif i == caller:
+            amount = min(stacks[i], stacks[shover])
+            actions.append({"position": pos[i], "action": "call", "amount_bb": round(amount / bb, 1),
+                            "allin": amount == stacks[i]})
         else:
             actions.append({"position": pos[i], "action": "fold"})
     return {
         "settings": {"players": n, "position": position, "kind": kind, "bb_min": bb_min, "bb_max": bb_max,
-                     "difficulty": difficulty, "model": model},
+                     "difficulty": difficulty, "model": model, "overcalls": overcalls},
         "level": level, "sb": sb, "bb": bb, "ante": ante,
         "seats": seats,
         "hero": hero_idx,
         "kind": kind,
         "shover": shover,
+        "caller": caller,
         "actions": actions,
         "cards": pick_cards(cls, rng),
         "hand": class_label(cls),

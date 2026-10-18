@@ -12,11 +12,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from mbr import equity3
 from mbr.ranges import equity_matrix, pair_weights
 from mbr.trainer import make_spot
 
 STATIC = Path(__file__).resolve().parent / "static"
-SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model"}
+SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -34,6 +35,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path == "/api/info":
+            self._json(200, {"overcalls": equity3.available()})
+            return
         if url.path == "/api/spot":
             params = {k: v[0] for k, v in parse_qs(url.query).items() if k in SPOT_PARAMS}
             try:
@@ -63,6 +67,10 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     pair_weights(), equity_matrix()  # warm the caches before the first request
+    if equity3.available():
+        equity3.order_tensors()
+    else:
+        print(f"Overcalls are off: {equity3.EQUITY3_FILE} is missing (see README)")
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"Trainer running at http://localhost:{args.port}  (Ctrl+C to stop)")
     try:

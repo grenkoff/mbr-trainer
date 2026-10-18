@@ -10,7 +10,7 @@ const DIFFICULTY_HINT = {
   mix: "Случайная сложность для каждой раздачи.",
 };
 const DIFF_NAME = { easy: "Легко", medium: "Средне", hard: "Сложно" };
-const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша" };
+const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша", overcall: "Оверколл" };
 const CLOSE_EV = 0.005; // decisions this close in EV count as correct either way
 const STATS_KEY = "mbr-trainer-stats-v1";
 const SETTINGS_KEY = "mbr-trainer-settings-v1";
@@ -30,7 +30,7 @@ function save(key, value) {
 }
 
 const settings = Object.assign(
-  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "medium", model: "bounty" },
+  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "medium", model: "bounty", overcalls: false },
   load(SETTINGS_KEY, {}),
 );
 let stats = load(STATS_KEY, []);
@@ -40,6 +40,7 @@ let current = null;   // spot being shown
 let answered = null;  // {choice, correct, cost} once answered
 let gridMode = "freq";
 let prefetch = null;  // {key, promise}
+let overcallsAvailable = true;
 
 /* ---------------- settings UI ---------------- */
 
@@ -65,17 +66,18 @@ function renderPositionButtons() {
   el.innerHTML = opts.map((p) => `<button data-v="${p}">${p === "any" ? "Любая" : p}</button>`).join("");
 }
 
+function kindAllowed(kind) {
+  const idx = positionsFor(settings.players).indexOf(settings.position); // -1 for any position
+  if (kind === "open") return idx !== settings.players - 1;
+  if (kind === "call") return idx !== 0;
+  if (kind === "overcall") return settings.overcalls && (idx === -1 || idx >= 2);
+  return true;
+}
+
 function updateAvailability() {
-  const pos = positionsFor(settings.players);
-  const first = pos[0], last = pos[pos.length - 1];
-  const kindBtns = $("setKind").querySelectorAll("button");
-  for (const b of kindBtns) {
-    b.disabled = (b.dataset.v === "call" && settings.position === first) ||
-                 (b.dataset.v === "open" && settings.position === last);
-  }
-  if ((settings.kind === "call" && settings.position === first) || (settings.kind === "open" && settings.position === last)) {
-    settings.kind = "any";
-  }
+  if (!overcallsAvailable) settings.overcalls = false;
+  for (const b of document.querySelectorAll("#setKind button, #setKind2 button")) b.disabled = !kindAllowed(b.dataset.v);
+  if (!kindAllowed(settings.kind)) settings.kind = "any";
 }
 
 const refreshers = [];
@@ -84,6 +86,8 @@ function setupSettings() {
   refreshers.push(bindSeg("setPlayers", () => settings.players, (v) => { settings.players = +v; renderPositionButtons(); }));
   refreshers.push(bindSeg("setPosition", () => settings.position, (v) => { settings.position = v; }));
   refreshers.push(bindSeg("setKind", () => settings.kind, (v) => { settings.kind = v; }));
+  refreshers.push(bindSeg("setKind2", () => settings.kind, (v) => { settings.kind = v; }));
+  $("setOvercalls").addEventListener("change", (e) => { settings.overcalls = e.target.checked; onSettingsChanged(); });
   refreshers.push(bindSeg("setDifficulty", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setStackPreset", () => `${settings.bbMin}-${settings.bbMax}`, (v) => {
     const [a, b] = v.split("-").map(Number);
@@ -108,6 +112,14 @@ function refreshSettingsUI() {
   $("bbMax").value = settings.bbMax;
   $("setModel").value = settings.model;
   $("difficultyHint").textContent = DIFFICULTY_HINT[settings.difficulty];
+  $("setOvercalls").checked = settings.overcalls;
+  $("setOvercalls").disabled = !overcallsAvailable;
+  $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable);
+  $("overcallsHint").textContent = !overcallsAvailable
+    ? "Нет таблицы эквити на троих (build/equity3.f32), см. README."
+    : settings.overcalls
+      ? "После пуша и колла игроки сзади могут оверколлить, до трёх игроков в олл-ине."
+      : "Пуш получает максимум один колл.";
 }
 
 function onSettingsChanged() {
@@ -126,6 +138,7 @@ function spotParams() {
   return new URLSearchParams({
     players: settings.players, position: settings.position, kind: settings.kind,
     bb_min: settings.bbMin, bb_max: settings.bbMax, difficulty: diff, model: settings.model,
+    overcalls: settings.overcalls ? 1 : 0,
   });
 }
 
@@ -207,7 +220,7 @@ function renderTable(spot) {
     if (act) {
       const a = document.createElement("div");
       a.className = `act ${act.action}`;
-      a.textContent = act.action === "fold" ? "фолд" : `ALL-IN`;
+      a.textContent = { fold: "фолд", allin: "ALL-IN", call: act.allin ? "КОЛЛ ALL-IN" : "КОЛЛ" }[act.action];
       a.style[p.y < 50 ? "bottom" : "top"] = "-20px";
       el.appendChild(a);
     }
@@ -218,6 +231,7 @@ function renderTable(spot) {
     if (seat.position === "SB") chips = spot.sb / bb;
     if (seat.position === "BB") chips = 1;
     if (act && act.action === "allin") { chips = seat.stack_bb - anteBB; cls += " allin"; }
+    else if (act && act.action === "call") { chips = act.amount_bb - anteBB; cls += " call"; }
     else pot += chips;
     if (chips > 0) {
       const c = seatPoint(rel, n, rel === 0 ? 0.45 : 0.62);
@@ -239,7 +253,8 @@ function renderTable(spot) {
     }
   });
   $("pot").textContent = `Банк ${fmtBB(pot)} bb`;
-  $("levelInfo").textContent = `Уровень ${spot.level}: ${spot.sb}/${spot.bb}, анте ${spot.ante}`;
+  $("levelInfo").textContent = `Уровень ${spot.level}: ${spot.sb}/${spot.bb}, анте ${spot.ante}` +
+    (spot.settings.overcalls ? " · с оверколлами" : "");
 }
 
 function renderQuestion(spot) {
@@ -247,10 +262,18 @@ function renderQuestion(spot) {
   if (spot.kind === "open") {
     $("question").innerHTML = `Вы на <b>${hero.position}</b>, до вас все сфолдили. Пуш или фолд?`;
     $("btnPlay").firstChild.textContent = "Пуш ";
-  } else {
+  } else if (spot.kind === "call") {
     const sh = spot.seats[spot.shover];
     const bounty = sh.hero_covers ? " Вы покрываете — на кону баунти." : " Он покрывает вас.";
     $("question").innerHTML = `<b>${sh.position}</b> пушит ${fmtBB(sh.stack_bb)} bb.${bounty} Колл или фолд?`;
+    $("btnPlay").firstChild.textContent = "Колл ";
+  } else {
+    const sh = spot.seats[spot.shover], ca = spot.seats[spot.caller];
+    const covered = [sh, ca].filter((x) => x.hero_covers).map((x) => x.position);
+    const bounty = covered.length === 2 ? " Вы покрываете обоих — на кону два баунти."
+      : covered.length === 1 ? ` Вы покрываете ${covered[0]}.` : " Оба покрывают вас.";
+    $("question").innerHTML =
+      `<b>${sh.position}</b> пушит ${fmtBB(sh.stack_bb)} bb, <b>${ca.position}</b> коллирует.${bounty} Оверколл или фолд?`;
     $("btnPlay").firstChild.textContent = "Колл ";
   }
 }
@@ -280,7 +303,7 @@ function answer(choice) {
   const record = {
     ts: Date.now(), kind: current.kind, players: current.seats.length,
     position: current.seats[current.hero].position, difficulty: current.settings.difficulty,
-    model: current.settings.model, hand: current.hand, correct, cost,
+    model: current.settings.model, overcalls: !!current.settings.overcalls, hand: current.hand, correct, cost,
   };
   stats.push(record);
   if (stats.length > 5000) stats = stats.slice(-5000);
@@ -313,9 +336,12 @@ function renderResult() {
     <span>Разница</span><span>${sign(d)} BI</span>
     <span>Солвер</span><span>${playWord} ${Math.round(a.solver_freq * 100)}%</span>`;
   const hero = spot.seats[spot.hero].position;
-  $("gridTitle").innerHTML = spot.kind === "open"
-    ? `Диапазон пуша <b>${hero}</b> — ${a.range_pct.toFixed(1)}%`
-    : `Колл <b>${hero}</b> против пуша <b>${spot.seats[spot.shover].position}</b> — ${a.range_pct.toFixed(1)}%`;
+  const vs = spot.kind === "open" ? "" : spot.seats[spot.shover].position;
+  $("gridTitle").innerHTML = {
+    open: `Диапазон пуша <b>${hero}</b>`,
+    call: `Колл <b>${hero}</b> против пуша <b>${vs}</b>`,
+    overcall: `Оверколл <b>${hero}</b>: пуш <b>${vs}</b>, колл <b>${spot.seats[spot.caller]?.position}</b>`,
+  }[spot.kind] + ` — ${a.range_pct.toFixed(1)}%`;
   renderGrid();
   $("result").classList.remove("hidden");
 }
@@ -391,7 +417,9 @@ function renderHistory() {
   $("history").innerHTML = history.slice(0, 50).map((h, idx) => {
     const s = h.spot;
     const pos = s.seats[s.hero].position;
-    const what = s.kind === "open" ? "опен" : `vs ${s.seats[s.shover].position}`;
+    const what = s.kind === "open" ? "опен"
+      : s.kind === "call" ? `vs ${s.seats[s.shover].position}`
+      : `vs ${s.seats[s.shover].position}+${s.seats[s.caller].position}`;
     return `<li data-idx="${idx}"><span class="${h.correct ? "ok" : "err"}">${h.correct ? "✔" : "✘"}</span>` +
       `<b>${s.hand}</b><span>${s.seats.length}p ${pos} ${what} ${fmtBB(s.seats[s.hero].stack_bb)}bb</span>` +
       `<span class="loss">${h.cost ? "−" + h.cost.toFixed(2) : ""}</span></li>`;
@@ -432,6 +460,16 @@ document.addEventListener("keydown", (e) => {
   else if ((k === " " || k === "enter") && answered) { e.preventDefault(); nextSpot(); }
 });
 
-setupSettings();
-renderStats();
-nextSpot();
+async function init() {
+  try {
+    const info = await (await fetch("/api/info")).json();
+    overcallsAvailable = !!info.overcalls;
+  } catch (e) {
+    overcallsAvailable = false;
+  }
+  setupSettings();
+  renderStats();
+  nextSpot();
+}
+
+init();

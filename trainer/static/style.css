@@ -8,6 +8,7 @@
   --accent: #f2b33d;
   --good: #3fbf7f;
   --bad: #e5534b;
+  --call: #3a78d6;
   --felt: #1d5a3c;
   --felt-edge: #123826;
   --play: 63, 191, 127;
@@ -44,6 +45,7 @@ kbd {
 /* settings */
 .field-label { display: block; color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
 .seg { display: flex; gap: 4px; }
+.seg + .seg { margin-top: 4px; }
 .seg.wrap { flex-wrap: wrap; }
 .seg.wrap button { flex: 1 1 auto; min-width: 38px; }
 .seg button {
@@ -54,6 +56,7 @@ kbd {
 .seg button.active { background: var(--accent); border-color: var(--accent); color: #1a1407; font-weight: 600; }
 .seg button:disabled { opacity: .35; cursor: not-allowed; }
 .seg.small button { flex: none; padding: 3px 10px; font-size: 12px; }
+#setKind button { white-space: nowrap; font-size: 12.5px; }
 .range-inputs { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--muted); }
 .range-inputs input, select {
   width: 100%; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line);
@@ -97,11 +100,13 @@ kbd {
 .seat .act { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 700; }
 .act.fold { color: var(--muted); }
 .act.allin { background: var(--bad); color: #fff; padding: 2px 8px; border-radius: 6px; }
+.act.call { background: var(--call); color: #fff; padding: 2px 8px; border-radius: 6px; }
 .chips {
   position: absolute; transform: translate(-50%, -50%); font-size: 11px; font-weight: 600;
   background: rgba(0,0,0,.45); padding: 1px 7px; border-radius: 999px; white-space: nowrap;
 }
 .chips.allin { background: var(--bad); }
+.chips.call { background: var(--call); }
 .dealer {
   position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%;
   background: #f4f4f4; color: #111; font-weight: 800; font-size: 11px; display: grid; place-items: center;

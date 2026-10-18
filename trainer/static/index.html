@@ -30,6 +30,9 @@
     <div class="seg" id="setKind">
       <button data-v="any">Любое</button><button data-v="open">Опен-пуш</button><button data-v="call">Колл пуша</button>
     </div>
+    <div class="seg" id="setKind2">
+      <button data-v="overcall">Оверколл (пуш + колл)</button>
+    </div>
 
     <label class="field-label">Стек героя, bb</label>
     <div class="seg wrap" id="setStackPreset">
@@ -55,9 +58,10 @@
       <option value="icm">Чистый ICM (без баунти)</option>
     </select>
 
-    <label class="toggle disabled" title="скоро">
-      <input type="checkbox" id="setOvercalls" disabled> Оверколлы <span class="soon">скоро</span>
+    <label class="toggle" id="overcallsToggle">
+      <input type="checkbox" id="setOvercalls"> Оверколлы
     </label>
+    <p class="hint" id="overcallsHint"></p>
 
     <div class="hotkeys">
       <div><kbd>F</kbd> фолд</div><div><kbd>A</kbd> пуш / колл</div><div><kbd>Space</kbd> следующая</div>

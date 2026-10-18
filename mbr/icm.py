@@ -1,14 +1,21 @@
 """Malmuth-Harville ICM."""
 
 
-def icm(stacks, payouts):
-    """Expected prize of each player. Busted players (stack 0) take the lowest remaining places."""
+def icm(stacks, payouts, dead_order=None):
+    """Expected prize of each player.
+
+    Busted players (stack 0) take the lowest remaining places: in dead_order (best first) if given,
+    otherwise sharing them evenly.
+    """
     n = len(stacks)
     eq = [0.0] * n
     alive = [i for i in range(n) if stacks[i] > 0]
     dead = [i for i in range(n) if stacks[i] <= 0]
-    if dead:
-        prize = lambda k: payouts[k] if k < len(payouts) else 0.0
+    prize = lambda k: payouts[k] if k < len(payouts) else 0.0
+    if dead and dead_order:
+        for place, i in enumerate(dead_order, start=len(alive)):
+            eq[i] = prize(place)
+    elif dead:
         share = sum(prize(k) for k in range(len(alive), n)) / len(dead)
         for i in dead:
             eq[i] = share
