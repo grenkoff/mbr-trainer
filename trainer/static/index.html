@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MBR Push/Fold тренажёр</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Mystery Battle Royale <span>push/fold тренажёр</span></div>
+  <div class="stats-inline" id="statsInline"></div>
+</header>
+
+<div class="layout">
+  <aside class="panel settings">
+    <h2>Настройки</h2>
+
+    <label class="field-label">Игроков за столом</label>
+    <div class="seg" id="setPlayers">
+      <button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
+      <button data-v="6" disabled title="скоро">6</button><button data-v="7" disabled title="скоро">7</button>
+      <button data-v="8" disabled title="скоро">8</button><button data-v="9" disabled title="скоро">9</button>
+    </div>
+
+    <label class="field-label">Позиция</label>
+    <div class="seg wrap" id="setPosition"></div>
+
+    <label class="field-label">Решение</label>
+    <div class="seg" id="setKind">
+      <button data-v="any">Любое</button><button data-v="open">Опен-пуш</button><button data-v="call">Колл пуша</button>
+    </div>
+
+    <label class="field-label">Стек героя, bb</label>
+    <div class="seg wrap" id="setStackPreset">
+      <button data-v="1-5">1–5</button><button data-v="5-10">5–10</button><button data-v="10-15">10–15</button>
+      <button data-v="15-20">15–20</button><button data-v="20-30">20–30</button><button data-v="3-20">3–20</button>
+    </div>
+    <div class="range-inputs">
+      <input type="number" id="bbMin" min="1" max="60" step="0.5"> —
+      <input type="number" id="bbMax" min="1" max="60" step="0.5">
+    </div>
+
+    <label class="field-label">Сложность</label>
+    <div class="seg" id="setDifficulty">
+      <button data-v="easy">Легко</button><button data-v="medium">Средне</button>
+      <button data-v="hard">Сложно</button><button data-v="mix">Микс</button>
+    </div>
+    <p class="hint" id="difficultyHint"></p>
+
+    <label class="field-label">Модель</label>
+    <select id="setModel">
+      <option value="bounty">ICM + баунти + будущие баунти</option>
+      <option value="bounty-now">ICM + баунти за нокаут</option>
+      <option value="icm">Чистый ICM (без баунти)</option>
+    </select>
+
+    <label class="toggle disabled" title="скоро">
+      <input type="checkbox" id="setOvercalls" disabled> Оверколлы <span class="soon">скоро</span>
+    </label>
+
+    <div class="hotkeys">
+      <div><kbd>F</kbd> фолд</div><div><kbd>A</kbd> пуш / колл</div><div><kbd>Space</kbd> следующая</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="table-wrap">
+      <div class="felt" id="felt">
+        <div class="pot" id="pot"></div>
+        <div class="level" id="levelInfo"></div>
+      </div>
+      <div class="loading hidden" id="loading">Солвер считает…</div>
+    </div>
+
+    <div class="actions">
+      <div class="question" id="question"></div>
+      <div class="buttons">
+        <button class="btn fold" id="btnFold">Фолд <kbd>F</kbd></button>
+        <button class="btn play" id="btnPlay">Пуш <kbd>A</kbd></button>
+        <button class="btn next hidden" id="btnNext">Следующая <kbd>Space</kbd></button>
+      </div>
+    </div>
+
+    <section class="panel result hidden" id="result">
+      <div class="result-head">
+        <div class="verdict" id="verdict"></div>
+        <div class="ev-table" id="evTable"></div>
+      </div>
+      <div class="result-grid">
+      <div class="grid-head">
+        <div class="grid-title" id="gridTitle"></div>
+        <div class="seg small" id="gridMode">
+          <button data-v="freq" class="active">Диапазон</button><button data-v="ev">EV</button>
+        </div>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="grid-tip" id="gridTip">&nbsp;</div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="panel side">
+    <h2>Сессия</h2>
+    <div id="statsBox"></div>
+    <button class="link" id="btnReset">Сбросить статистику</button>
+    <h2>История</h2>
+    <ol class="history" id="history"></ol>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
