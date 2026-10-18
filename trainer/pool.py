@@ -20,7 +20,7 @@ POOL_DIR = Path(__file__).resolve().parent.parent / "build" / "spot_pool" / f"v{
 TARGET = 10  # spots kept ready for each settings in use
 WANTED_FOR = 15 * 60  # seconds after the last request that settings count as in use
 DEFAULTS = {"players": 5, "position": "any", "kind": "any", "bb_min": 5, "bb_max": 20,
-            "difficulty": "medium", "model": "bounty", "overcalls": False}
+            "difficulty": "medium", "model": "bounty", "overcalls": False, "stacks": "random"}
 
 
 def normalize(params):
@@ -34,19 +34,21 @@ def normalize(params):
         "difficulty": str(p["difficulty"]),
         "model": str(p["model"]),
         "overcalls": str(p["overcalls"]).lower() in ("1", "true", "yes", "on"),
+        "stacks": str(p["stacks"]),
     }
 
 
 def key_of(p):
     return (f"{p['players']}p_{p['position']}_{p['kind']}_{p['bb_min']:g}-{p['bb_max']:g}bb_"
-            f"{p['difficulty']}_{p['model']}_{'oc' if p['overcalls'] else 'nooc'}")
+            f"{p['difficulty']}_{p['model']}_{'oc' if p['overcalls'] else 'nooc'}"
+            + ("_history" if p["stacks"] == "history" else ""))
 
 
 def _init_worker():
-    from mbr import equity3
+    from mbr import equity3, real_stacks
     from mbr.ranges import equity_matrix, pair_weights
 
-    pair_weights(), equity_matrix()
+    pair_weights(), equity_matrix(), real_stacks.snapshots()
     if equity3.available():
         equity3.order_tensors()
 

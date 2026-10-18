@@ -32,7 +32,7 @@ function save(key, value) {
 }
 
 const settings = Object.assign(
-  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "bounty", overcalls: false },
+  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "bounty", overcalls: false, stacks: "random" },
   load(SETTINGS_KEY, {}),
 );
 let stats = load(STATS_KEY, []);
@@ -44,8 +44,16 @@ let gridMode = "freq";
 let prefetch = null;  // {key, promise}
 let spotSeq = 0;      // id of the latest nextSpot() call
 let overcallsAvailable = true;
+let historyCounts = {}; // players -> final-table hands in the user's hand histories
 
 /* ---------------- settings UI ---------------- */
+
+function plural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  return m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+}
+const handsWord = (n) => `${n} ${plural(n, "раздача", "раздачи", "раздач")}`;
 
 function positionsFor(n) { return POSITIONS.slice(-n); }
 
@@ -79,6 +87,8 @@ function kindAllowed(kind) {
 
 function updateAvailability() {
   if (!overcallsAvailable) settings.overcalls = false;
+  if (!historyCounts[settings.players]) settings.stacks = "random";
+  $("setStacks").querySelector('[data-v="history"]').disabled = !historyCounts[settings.players];
   for (const b of document.querySelectorAll("#setKind button, #setKind2 button")) b.disabled = !kindAllowed(b.dataset.v);
   if (!kindAllowed(settings.kind)) settings.kind = "any";
 }
@@ -91,6 +101,7 @@ function setupSettings() {
   refreshers.push(bindSeg("setKind", () => settings.kind, (v) => { settings.kind = v; }));
   refreshers.push(bindSeg("setKind2", () => settings.kind, (v) => { settings.kind = v; }));
   $("setOvercalls").addEventListener("change", (e) => { settings.overcalls = e.target.checked; onSettingsChanged(); });
+  refreshers.push(bindSeg("setStacks", () => settings.stacks, (v) => { settings.stacks = v; }));
   refreshers.push(bindSeg("setDifficulty0", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setDifficulty", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setStackPreset", () => `${settings.bbMin}-${settings.bbMax}`, (v) => {
@@ -116,6 +127,14 @@ function refreshSettingsUI() {
   $("bbMax").value = settings.bbMax;
   $("setModel").value = settings.model;
   $("difficultyHint").textContent = DIFFICULTY_HINT[settings.difficulty];
+  const hands = historyCounts[settings.players] || 0;
+  $("stacksHint").textContent = !Object.keys(historyCounts).length
+    ? "Нет истории рук в hh/hands."
+    : settings.stacks === "history"
+      ? `Блайнды и стеки ваших раздач финального стола: ${handsWord(hands)} на ${settings.players} игроков. ` +
+        "Вы можете сидеть на любом месте, которое подходит под позицию и стек."
+      : hands ? `Случайный уровень и стеки. В истории ${handsWord(hands)} на ${settings.players} игроков.`
+        : `Случайный уровень и стеки. В истории нет раздач на ${settings.players} игроков.`;
   $("setOvercalls").checked = settings.overcalls;
   $("setOvercalls").disabled = !overcallsAvailable;
   $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable);
@@ -142,7 +161,7 @@ function spotParams() {
   return new URLSearchParams({
     players: settings.players, position: settings.position, kind: settings.kind,
     bb_min: settings.bbMin, bb_max: settings.bbMax, difficulty: diff, model: settings.model,
-    overcalls: settings.overcalls ? 1 : 0,
+    overcalls: settings.overcalls ? 1 : 0, stacks: settings.stacks,
   });
 }
 
@@ -263,7 +282,8 @@ function renderTable(spot) {
   });
   $("pot").textContent = `Банк ${fmtBB(pot)} bb`;
   $("levelInfo").textContent = `Уровень ${spot.level}: ${spot.sb}/${spot.bb}, анте ${spot.ante}` +
-    (spot.settings.overcalls ? " · с оверколлами" : "");
+    (spot.settings.overcalls ? " · с оверколлами" : "") +
+    (spot.source && spot.source.hand_id ? ` · раздача #${spot.source.hand_id}` : "");
 }
 
 function renderQuestion(spot) {
@@ -312,7 +332,8 @@ function answer(choice) {
   const record = {
     ts: Date.now(), kind: current.kind, players: current.seats.length,
     position: current.seats[current.hero].position, difficulty: current.settings.difficulty,
-    model: current.settings.model, overcalls: !!current.settings.overcalls, hand: current.hand, correct, cost,
+    model: current.settings.model, overcalls: !!current.settings.overcalls, stacks: current.settings.stacks || "random",
+    hand: current.hand, correct, cost,
   };
   stats.push(record);
   if (stats.length > 5000) stats = stats.slice(-5000);
@@ -476,6 +497,7 @@ async function init() {
   try {
     const info = await (await fetch("/api/info")).json();
     overcallsAvailable = !!info.overcalls;
+    historyCounts = info.history || {};
   } catch (e) {
     overcallsAvailable = false;
   }

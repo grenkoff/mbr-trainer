@@ -24,6 +24,8 @@ Settings:
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
+- stacks: random, or the blinds and stacks of real final-table hands from `hh/hands/`, with Hero in any
+  seat whose position and stack fit the settings;
 - difficulty:
   - as at the table: every one of the 1326 combos dealt with equal probability;
   - or by the cost of a mistake: easy more than 0.10 BI;
@@ -38,7 +40,7 @@ settings in use, so answers come instantly. The stock is kept in `build/spot_poo
 can be filled in advance, also while the server runs:
 
 ```bash
-.venv/bin/python -m trainer.fill --players 5 --difficulty mix --overcalls --count 300
+.venv/bin/python -m trainer.fill --players 5 --difficulty mix --overcalls --stacks history --count 300
 ```
 
 ## Solver

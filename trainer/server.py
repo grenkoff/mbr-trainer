@@ -12,11 +12,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from mbr import equity3
+from mbr import equity3, real_stacks
 from trainer.pool import SpotPool
 
 STATIC = Path(__file__).resolve().parent / "static"
-SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls"}
+SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls", "stacks"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -37,7 +37,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/info":
-            self._json(200, {"overcalls": equity3.available(), "pool": self.pool.status()})
+            self._json(200, {"overcalls": equity3.available(), "history": real_stacks.counts(),
+                             "pool": self.pool.status()})
             return
         if url.path == "/api/spot":
             params = {k: v[0] for k, v in parse_qs(url.query).items() if k in SPOT_PARAMS}

@@ -4,7 +4,7 @@ import random
 
 import numpy as np
 
-from mbr import equity3
+from mbr import equity3, real_stacks
 from mbr.pushfold import MEAN_BOUNTY_BI, Solver, Table
 from mbr.ranges import class_combos, class_label, combo_counts
 
@@ -93,8 +93,12 @@ LINE_ATTEMPTS = 3
 
 
 def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, difficulty="medium",
-              model="bounty", overcalls=False, seed=None):
-    """Generate spots until one has a hand of the requested difficulty."""
+              model="bounty", overcalls=False, stacks="random", seed=None):
+    """Generate spots until one has a hand of the requested difficulty.
+
+    stacks: "random" stacks at a random blind level, or "history" for the blinds and stacks of a real
+    final-table hand from the user's hand histories, with Hero in any seat that fits the settings.
+    """
     overcalls = str(overcalls).lower() in ("1", "true", "yes", "on")
     if overcalls and not equity3.available():
         raise ValueError("overcalls need the 3-way equity table: build/equity3.f32 (see README)")
@@ -104,9 +108,13 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
         raise ValueError(f"players must be 3..{len(POSITIONS)}")
     if difficulty not in DIFFICULTIES:
         raise ValueError(f"unknown difficulty {difficulty}")
+    if stacks not in ("random", "history"):
+        raise ValueError(f"unknown stacks source {stacks}")
+    if stacks == "history" and not real_stacks.snapshots():
+        raise ValueError(f"no hand histories in {real_stacks.HANDS_DIR}")
     rng = random.Random(seed)
     for attempt in range(MAX_ATTEMPTS):
-        spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls,
+        spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, stacks,
                           strict=attempt < MAX_ATTEMPTS - 1)
         if spot:
             return spot
@@ -160,7 +168,22 @@ def _pick_decision(solver, hero_idx, kind, difficulty, rng, strict):
     return None
 
 
-def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, strict):
+def history_setup(n, hero_options, bb_min, bb_max, rng):
+    """A real final-table set-up with n players where Hero can sit in a seat that fits the settings."""
+    fitting = []
+    for snap in real_stacks.snapshots().get(n, []):
+        options = [(i, k) for i, k in hero_options if bb_min <= snap["stacks"][i] / snap["bb"] <= bb_max]
+        if options:
+            fitting.append((snap, options))
+    if not fitting:
+        raise ValueError(f"no {n}-player hands in the history with a stack of {bb_min:g}-{bb_max:g} bb "
+                         "in the chosen position")
+    snap, options = rng.choice(fitting)
+    return snap, rng.choice(options)
+
+
+def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, stacks_source,
+               strict):
     n = int(players)
     pos = positions(n)
     if kind == "any":
@@ -171,9 +194,15 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
                     for k in allowed_kinds if _kind_fits(k, i, n)]
     if not hero_options:
         raise ValueError(f"position {position} cannot face '{kind}' with {n} players")
-    hero_idx, kind = rng.choice(hero_options)
-    hero_bb = rng.uniform(float(bb_min), float(bb_max))
-    (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
+    source = {"stacks": stacks_source}
+    if stacks_source == "history":
+        snap, (hero_idx, kind) = history_setup(n, hero_options, float(bb_min), float(bb_max), rng)
+        level, sb, bb, ante, stacks = snap["level"], snap["sb"], snap["bb"], snap["ante"], list(snap["stacks"])
+        source["hand_id"] = snap["hand_id"]
+    else:
+        hero_idx, kind = rng.choice(hero_options)
+        hero_bb = rng.uniform(float(bb_min), float(bb_max))
+        (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
     table = build_table(stacks, sb, bb, ante, model)
     solver = Solver(table, overcalls=overcalls).solve()
 
@@ -210,7 +239,8 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
             actions.append({"position": pos[i], "action": "fold"})
     return {
         "settings": {"players": n, "position": position, "kind": kind, "bb_min": bb_min, "bb_max": bb_max,
-                     "difficulty": difficulty, "model": model, "overcalls": overcalls},
+                     "difficulty": difficulty, "model": model, "overcalls": overcalls, "stacks": stacks_source},
+        "source": source,
         "level": level, "sb": sb, "bb": bb, "ante": ante,
         "seats": seats,
         "hero": hero_idx,
