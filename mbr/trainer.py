@@ -22,6 +22,7 @@ MODELS = {
 }
 # cost of the mistake |EV(play) - EV(fold)| in buy-ins
 DIFFICULTY_BANDS = {"hard": (0.0, 0.03), "medium": (0.03, 0.10), "easy": (0.10, 100.0)}
+DIFFICULTIES = ["natural", *DIFFICULTY_BANDS]
 MIN_STACK_BB = 1.5
 MAX_STACK_BB = 70
 AVG_STACK_BB = (4, 30)  # realistic average stack depth for the chosen level
@@ -62,8 +63,13 @@ def build_table(stacks, sb, bb, ante, model):
 
 
 def pick_hand(ev_diff, difficulty, rng, strict=True):
-    """Pick a hand class whose mistake cost matches the difficulty, or None if strict and there is none."""
+    """Pick a hand class whose mistake cost matches the difficulty, or None if strict and there is none.
+
+    "natural" deals every one of the 1326 combos with equal probability, as at the table.
+    """
     cc = combo_counts()
+    if difficulty == "natural":
+        return int(rng.choices(range(len(cc)), weights=list(cc))[0])
     cost = np.abs(ev_diff)
     lo, hi = DIFFICULTY_BANDS[difficulty]
     mask = (cost >= lo) & (cost < hi)
@@ -94,6 +100,8 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
         raise ValueError("overcalls need the 3-way equity table: build/equity3.f32 (see README)")
     if kind == "overcall" and not overcalls:
         raise ValueError("overcall spots need overcalls enabled")
+    if difficulty not in DIFFICULTIES:
+        raise ValueError(f"unknown difficulty {difficulty}")
     rng = random.Random(seed)
     for attempt in range(MAX_ATTEMPTS):
         spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls,

@@ -13,14 +13,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from mbr import equity3
-from mbr.ranges import equity_matrix, pair_weights
-from mbr.trainer import make_spot
+from trainer.pool import SpotPool
 
 STATIC = Path(__file__).resolve().parent / "static"
 SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls"}
 
 
 class Handler(BaseHTTPRequestHandler):
+    pool = None  # SpotPool, set in main()
+
     def _send(self, code, body, content_type):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         self.send_response(code)
@@ -36,13 +37,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         if url.path == "/api/info":
-            self._json(200, {"overcalls": equity3.available()})
+            self._json(200, {"overcalls": equity3.available(), "pool": self.pool.status()})
             return
         if url.path == "/api/spot":
             params = {k: v[0] for k, v in parse_qs(url.query).items() if k in SPOT_PARAMS}
             try:
-                self._json(200, make_spot(**params))
-            except ValueError as e:
+                self._json(200, self.pool.take(params))
+            except (ValueError, TimeoutError) as e:
                 self._json(400, {"error": str(e)})
             except Exception:
                 traceback.print_exc()
@@ -65,18 +66,20 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser(description="Mystery Battle Royale push/fold trainer")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--workers", type=int, default=None, help="solver processes (default: CPU cores - 1)")
     args = ap.parse_args()
-    pair_weights(), equity_matrix()  # warm the caches before the first request
-    if equity3.available():
-        equity3.order_tensors()
-    else:
+    if not equity3.available():
         print(f"Overcalls are off: {equity3.EQUITY3_FILE} is missing (see README)")
+    Handler.pool = SpotPool(workers=args.workers)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Trainer running at http://localhost:{args.port}  (Ctrl+C to stop)")
+    print(f"Trainer running at http://localhost:{args.port}  ({Handler.pool.workers} solver processes, "
+          f"Ctrl+C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        Handler.pool.shutdown()
 
 
 if __name__ == "__main__":

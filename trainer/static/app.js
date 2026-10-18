@@ -4,12 +4,13 @@ const POSITIONS = ["UTG", "UTG1", "UTG2", "LJ", "HJ", "CO", "BTN", "SB", "BB"];
 const RANKS = "AKQJT98765432";
 const SUIT_SYMBOL = { s: "♠", h: "♥", d: "♦", c: "♣" };
 const DIFFICULTY_HINT = {
+  natural: "Карты раздаются равномерно, как за столом: все 1326 комбинаций с равной вероятностью.",
   easy: "Ошибка стоит больше 0.10 BI — очевидные решения.",
   medium: "Ошибка стоит 0.03–0.10 BI.",
   hard: "Ошибка стоит меньше 0.03 BI — руки у границы диапазона.",
   mix: "Случайная сложность для каждой раздачи.",
 };
-const DIFF_NAME = { easy: "Легко", medium: "Средне", hard: "Сложно" };
+const DIFF_NAME = { natural: "Как в игре", easy: "Легко", medium: "Средне", hard: "Сложно" };
 const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша", overcall: "Оверколл" };
 const CLOSE_EV = 0.005; // decisions this close in EV count as correct either way
 const STATS_KEY = "mbr-trainer-stats-v1";
@@ -30,7 +31,7 @@ function save(key, value) {
 }
 
 const settings = Object.assign(
-  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "medium", model: "bounty", overcalls: false },
+  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "bounty", overcalls: false },
   load(SETTINGS_KEY, {}),
 );
 let stats = load(STATS_KEY, []);
@@ -88,6 +89,7 @@ function setupSettings() {
   refreshers.push(bindSeg("setKind", () => settings.kind, (v) => { settings.kind = v; }));
   refreshers.push(bindSeg("setKind2", () => settings.kind, (v) => { settings.kind = v; }));
   $("setOvercalls").addEventListener("change", (e) => { settings.overcalls = e.target.checked; onSettingsChanged(); });
+  refreshers.push(bindSeg("setDifficulty0", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setDifficulty", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setStackPreset", () => `${settings.bbMin}-${settings.bbMax}`, (v) => {
     const [a, b] = v.split("-").map(Number);

@@ -24,14 +24,22 @@ Settings:
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
-- difficulty, set by the cost of a mistake:
-  - easy: more than 0.10 BI;
-  - medium: 0.03–0.10 BI;
-  - hard: less than 0.03 BI;
+- difficulty:
+  - as at the table: every one of the 1326 combos dealt with equal probability;
+  - or by the cost of a mistake: easy more than 0.10 BI;
+    medium 0.03–0.10 BI, hard less than 0.03 BI;
 - valuation model;
 - overcalls on/off (needs `build/equity3.f32`).
 
 Hotkeys: `F` fold, `A` shove/call, `Space` next.
+
+Solver processes (CPU cores − 1 by default, `--workers N`) keep about 10 solved spots ready for the
+settings in use, so answers come instantly. The stock is kept in `build/spot_pool/` between runs and
+can be filled in advance, also while the server runs:
+
+```bash
+.venv/bin/python -m trainer.fill --players 5 --difficulty mix --overcalls --count 300
+```
 
 ## Solver
 
