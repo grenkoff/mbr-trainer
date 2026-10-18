@@ -127,15 +127,18 @@ def _kind_fits(kind, i, n):
 def pick_line(solver, hero_idx, kind, rng):
     """Choose (shover, caller) before Hero in proportion to how often equilibrium play produces the line."""
     cc = combo_counts()
+    freq = lambda strategy: float(strategy @ cc / cc.sum())
     cp = {key: solver._caller_stats(*key)[0] for key in solver.call}
     lines, weights, reach = [], [], 1.0
     for i in range(hero_idx):
-        ppush = float(solver.push[i] @ cc / cc.sum())
+        ppush = freq(solver.push[i])
         folds = 1.0  # players after the shover fold before the caller (or Hero)
         for j in range(i + 1, hero_idx):
             if kind == "overcall":
+                # and the players between the caller and Hero do not overcall
+                over_folds = np.prod([1 - freq(solver.over[i, j, k]) for k in range(j + 1, hero_idx)])
                 lines.append((i, j))
-                weights.append(reach * ppush * folds * cp[i, j])
+                weights.append(reach * ppush * folds * cp[i, j] * over_folds)
             folds *= 1 - cp[i, j]
         if kind == "call":
             lines.append((i, None))

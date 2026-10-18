@@ -35,3 +35,9 @@ def order_tensors():
     # position p of T holds the hand of role o[p]; order the axes as overcaller, shover, caller
     return tuple(np.ascontiguousarray(t.transpose(o.index(2), o.index(0), o.index(1))).reshape(n, n * n)
                  for o in ORDERS)
+
+
+@lru_cache(maxsize=1)
+def order_mass():
+    """D[a * 169 + b] = sum over c and the strength orders of U_o[a, b, c] (the combo triple count), at least 1e-9."""
+    return np.maximum(sum(t.sum(axis=0) for t in order_tensors()), 1e-9).astype(np.float32)

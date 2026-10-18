@@ -64,8 +64,9 @@ class SpotPool:
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.workers = workers or max(1, (os.cpu_count() or 2) - 1)
-        # one BLAS thread per worker: the workers already use all the cores
+        # one BLAS / solver thread per worker: the workers already use all the cores
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        os.environ["MBR_THREADS"] = "1"
         self.executor = ProcessPoolExecutor(self.workers, mp_context=multiprocessing.get_context("spawn"),
                                             initializer=_init_worker)
         self.cond = threading.Condition()

@@ -21,7 +21,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from mbr import equity3
+import os
+
+from mbr import equity3, native
 from mbr.icm import icm
 from mbr.ranges import N_CLASSES, combo_counts, equity_matrix, pair_weights
 
@@ -113,28 +115,29 @@ class Solver:
         self.push = {i: np.full(N_CLASSES, 0.5) for i in range(m - 1)}
         self.call = {(i, j): np.full(N_CLASSES, 0.5) for i in range(m - 1) for j in range(i + 1, m)}
         self.over = {}
+        self.v3 = {}  # 3-way all-in values for each strength order
         if self.overcalls:
-            self._init_multiway()
+            for i in range(m - 2):
+                for j in range(i + 1, m - 1):
+                    for k in range(j + 1, m):
+                        roles = (i, j, k)
+                        self.v3[i, j, k] = np.array(
+                            [table.allin_values([roles[r] for r in o]) for o in equity3.ORDERS], dtype=np.float32)
+                        self.over[i, j, k] = np.full(N_CLASSES, 0.5)
 
     def _init_multiway(self):
-        m, n = self.t.m, N_CLASSES
+        """Arrays for the numpy version of the multiway evaluation."""
+        if hasattr(self, "T3"):
+            return
         self.T3 = equity3.order_tensors()
         self._slices = {}
-        self.D_all = np.maximum(self._order_marginals(np.ones((1, n)))[0].sum(axis=0), 1e-9)  # sum_c W3[a, b, c]
+        self.D_all = equity3.order_mass().reshape(N_CLASSES, N_CLASSES)  # sum_c W3[a, b, c]
         self.W32 = self.W.astype(np.float32)
         E = equity_matrix()
         # heads-up showdown values of every player over the (shover hand, caller hand) grid: shape (m, n, n)
         self.hu = {(i, j): (np.multiply.outer(self.v_iwin[i, j], E)
                             + np.multiply.outer(self.v_jwin[i, j], 1 - E)).astype(np.float32)
                    for (i, j) in self.call}
-        self.v3 = {}
-        for i in range(m - 2):
-            for j in range(i + 1, m - 1):
-                for k in range(j + 1, m):
-                    roles = (i, j, k)
-                    self.v3[i, j, k] = np.array([self.t.allin_values([roles[r] for r in o]) for o in equity3.ORDERS],
-                                                dtype=np.float32)
-                    self.over[i, j, k] = np.full(n, 0.5)
 
     # --- range statistics -------------------------------------------------
     def _caller_stats(self, i, j):
@@ -244,6 +247,7 @@ class Solver:
         return ev
 
     def _evaluate_multiway(self):
+        self._init_multiway()
         m, n = self.t.m, N_CLASSES
         W, Wsum = self.W32, self.Wsum
         f32 = lambda x: x.astype(np.float32)
@@ -260,7 +264,8 @@ class Solver:
             cur = R[i, j, m] = self.hu[i, j]
             for k in range(m - 1, j, -1):
                 s = marg[i, j, k]
-                over_p[i, j, k] = s.sum(axis=0) / self.D_all
+                # at most 1: rounding could push a full overcalling range over and make weights negative
+                over_p[i, j, k] = np.minimum(s.sum(axis=0) / self.D_all, 1.0)
                 cur = ((self.v3[i, j, k].T @ s.reshape(len(s), -1)).reshape(m, n, n) / self.D_all
                        + (1 - over_p[i, j, k]) * cur)
                 R[i, j, k] = cur
@@ -306,10 +311,37 @@ class Solver:
 
     def solve(self, iterations=None, tol=1e-4, warm_start=True, warm_weight=None):
         """Fictitious play. With overcalls the strategies start from the solution without overcalls,
-        which counts as warm_weight iterations of the average, and the overcalls from a best response."""
+        which counts as warm_weight iterations of the average, and the overcalls from a best response.
+
+        The default schedule runs in the Rust solver when it is built (see mbr.native), otherwise in numpy.
+        """
+        if native.enabled() and iterations is None and warm_start and warm_weight is None:
+            return self._solve_native(tol)
+        return self.solve_python(iterations, tol, warm_start, warm_weight)
+
+    def _solve_native(self, tol):
+        m = self.t.m
+        pairs, triples = list(self.call), list(self.over)
+        params = [300, tol, MULTIWAY_ITERATIONS, WARM_START_WEIGHT, WARM_START_MIN_FREQ, MULTIWAY_MIN_FREQ,
+                  float(os.environ.get("MBR_THREADS", 0))]
+        strategy, ev_play, ev_fold = native.solve(
+            m, self.W, equity_matrix(), self.cc, np.array(self.v_steal),
+            [self.v_iwin[p] for p in pairs], [self.v_jwin[p] for p in pairs], [self.v3[t] for t in triples],
+            equity3.order_tensors() if self.overcalls else None,
+            equity3.order_mass() if self.overcalls else None, params)
+        self.ev = {}
+        nodes = [("push", self.push, i) for i in self.push] + [("call", self.call, p) for p in pairs] \
+            + [("over", self.over, t) for t in triples]
+        for node, (name, strat, key) in enumerate(nodes):
+            strat[key] = strategy[node]
+            self.ev[(name, *key) if isinstance(key, tuple) else (name, key)] = (ev_play[node], float(ev_fold[node]))
+        return self
+
+    def solve_python(self, iterations=None, tol=1e-4, warm_start=True, warm_weight=None):
+        """The numpy version of solve()."""
         offset = 0
         if self.overcalls and warm_start:
-            base = Solver(self.t).solve()
+            base = Solver(self.t).solve_python()
             # drop the hands that were (almost) never a best response so the ranges stay sparse
             clean = lambda x: np.where(x < WARM_START_MIN_FREQ, 0.0, x)
             self.push = {i: clean(x) for i, x in base.push.items()}

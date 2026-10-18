@@ -11,7 +11,12 @@ python3 -m venv .venv
 # 3-way all-in table for overcalls (19 MB, a couple of minutes on 4 cores)
 mkdir -p build
 gcc -O3 -march=native -fopenmp -o build/equity3 csrc/equity3.c && build/equity3 1000 build/equity3.f32
+# the Rust solver (optional, 2-6 times faster than numpy); without it the numpy version runs
+(cd rust && cargo build --release)
 ```
+
+The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unless `MBR_SOLVER=python`;
+`MBR_THREADS=N` sets its threads (default: all cores; the trainer's solver processes use one each).
 
 ## Trainer
 
