@@ -64,7 +64,21 @@ The model:
 - optionally, the future bounties are split in proportion to chips.
 
 With overcalls the solver starts from the solution without them and runs 40 more fictitious play
-iterations: about 1–2 seconds for 3–5 players.
+iterations: about 1–2 seconds for 3–5 players. Later iterations weigh more in the averaged strategies
+(weight ~ t³), which converges far faster than the plain mean.
+
+### Checks
+
+```bash
+.venv/bin/python check_gs2008.py                  # against the published 3-player equilibrium
+.venv/bin/python exploitability.py --per-count 5  # how far from an equilibrium, on real stacks
+```
+
+- `check_gs2008.py` solves the game from Ganzfried & Sandholm (AAMAS 2008): one hand of a cash game,
+  3 × 4500 chips, blinds 300/600, chip EV. It compares the six ranges with the paper's tables
+  (`data/gs2008_single_hand.txt`).
+- `exploitability.py` measures how much a player would win per hand by best-responding to the
+  solved ranges (`mbr/exploit.py`). Near zero means the ranges are an equilibrium of the model.
 
 ## Hand history analysis
 

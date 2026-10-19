@@ -14,7 +14,8 @@ Values are in buy-ins:
 - plus, optionally, the future bounties still to be won at the table, split in proportion to chips.
 
 Strategies are solved with fictitious play: every iteration each player best-responds to the averaged
-strategies of the others, and the averages move towards the best responses.
+strategies of the others, and the averages move towards the best responses. Later iterations weigh
+more in the average (AVERAGING), which converges far faster than the plain mean.
 """
 
 from dataclasses import dataclass, field
@@ -34,6 +35,8 @@ WARM_START_WEIGHT = 1
 WARM_START_MIN_FREQ = 0.02
 MULTIWAY_MIN_FREQ = 0.03
 MULTIWAY_ITERATIONS = 40
+# iteration t enters the average with weight ~ t^(AVERAGING - 1); 1 is plain fictitious play
+AVERAGING = 4
 
 
 @dataclass
@@ -323,7 +326,7 @@ class Solver:
         m = self.t.m
         pairs, triples = list(self.call), list(self.over)
         params = [300, tol, MULTIWAY_ITERATIONS, WARM_START_WEIGHT, WARM_START_MIN_FREQ, MULTIWAY_MIN_FREQ,
-                  float(os.environ.get("MBR_THREADS", 0))]
+                  float(os.environ.get("MBR_THREADS", 0)), AVERAGING]
         strategy, ev_play, ev_fold = native.solve(
             m, self.W, equity_matrix(), self.cc, np.array(self.v_steal),
             [self.v_iwin[p] for p in pairs], [self.v_jwin[p] for p in pairs], [self.v3[t] for t in triples],
@@ -353,7 +356,7 @@ class Solver:
         strategies = [(self.push, "push"), (self.call, "call"), (self.over, "over")]
         for it in range(iterations):
             ev = self.evaluate()
-            step = 1.0 / (it + 2 + offset)
+            step = AVERAGING / (it + AVERAGING + 1 + offset)
             delta = 0.0
             for strat, name in strategies:
                 rate = 1.0 if offset and it == 0 and name == "over" else step

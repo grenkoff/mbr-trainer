@@ -23,6 +23,8 @@ pub struct Params {
     pub warm_min_freq: f64,
     pub mw_min_freq: f64,
     pub threads: usize,
+    /// iteration t enters the averaged strategies with weight ~ t^(averaging - 1)
+    pub averaging: f64,
 }
 
 /// The 3-way outcome tensor: `t[o][c * NN + a * N + b]` = combo weight * P(strength order o) for
@@ -802,7 +804,7 @@ fn fictitious_play(
 ) {
     for it in 0..iterations {
         let ev = g.evaluate(s, multiway, p.threads, p.mw_min_freq);
-        let step = 1.0 / (it as f64 + 2.0 + offset);
+        let step = p.averaging / (it as f64 + p.averaging + 1.0 + offset);
         let mut delta: f64 = 0.0;
         for (x, e) in s.push.iter_mut().zip(&ev.push) {
             delta = delta.max(update(x, e, step));

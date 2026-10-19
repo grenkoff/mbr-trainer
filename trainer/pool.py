@@ -15,7 +15,7 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-POOL_VERSION = 1  # bump when the solver or the spot format changes: older stock is then ignored
+POOL_VERSION = 2  # bump when the solver or the spot format changes: older stock is then ignored
 POOL_DIR = Path(__file__).resolve().parent.parent / "build" / "spot_pool" / f"v{POOL_VERSION}"
 TARGET = 10  # spots kept ready for each settings in use
 WANTED_FOR = 15 * 60  # seconds after the last request that settings count as in use

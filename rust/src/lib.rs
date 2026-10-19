@@ -14,7 +14,7 @@ use std::slice;
 /// - `v3`: per triple (i, j, k) in the same order, 6 x m values for each strength order;
 /// - `t3`: 6 pointers to the f32 order tensors (169 x 169*169) and `d_all` (f32, 169*169), or null
 ///   for no overcalls;
-/// - `params`: hu_iterations, tol, mw_iterations, warm_weight, warm_min_freq, mw_min_freq, threads.
+/// - `params`: hu_iterations, tol, mw_iterations, warm_weight, warm_min_freq, mw_min_freq, threads, averaging.
 ///
 /// Outputs: strategies per decision node (shoves, first calls, overcalls, 169 values each), and
 /// `ev_play` (169 per node) and `ev_fold` (one per node) in the same node order. Returns 0 on success.
@@ -65,7 +65,7 @@ pub unsafe extern "C" fn mbr_solve(
         if nt > 0 { slice::from_raw_parts(v3, nt * ORDERS * m) } else { &[] },
         mw,
     );
-    let pr = slice::from_raw_parts(params, 7);
+    let pr = slice::from_raw_parts(params, 8);
     let threads = if pr[6] >= 1.0 {
         pr[6] as usize
     } else {
@@ -79,6 +79,7 @@ pub unsafe extern "C" fn mbr_solve(
         warm_min_freq: pr[4],
         mw_min_freq: pr[5],
         threads,
+        averaging: pr[7],
     };
     let (s, ev) = if evaluate_only != 0 {
         // the strategies come in through out_strategy; evaluate them once
