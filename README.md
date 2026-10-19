@@ -73,6 +73,8 @@ Put GG hand histories into `hh/hands/` and tournament summaries into `hh/summari
 ```bash
 python3 report.py                                      # structure stats and most frequent spots
 .venv/bin/python compare.py --model bounty             # score Hero's decisions against the solver
+.venv/bin/python compare.py --model bounty --overcalls --workers 2   # with overcalls (slower, resumable)
+python3 leaks.py build/decisions_bounty_overcalls.csv  # where the EV goes, by situation
 ```
 
 ## Equity tables
