@@ -25,7 +25,7 @@ The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unle
 ```
 
 Settings:
-- number of players (3–9);
+- number of players (3–9, several at once: each spot gets one of them);
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;

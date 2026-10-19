@@ -32,9 +32,10 @@ function save(key, value) {
 }
 
 const settings = Object.assign(
-  { players: 5, position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "bounty", overcalls: false, stacks: "random" },
+  { players: [5], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "bounty", overcalls: false, stacks: "random" },
   load(SETTINGS_KEY, {}),
 );
+if (!Array.isArray(settings.players)) settings.players = [+settings.players || 5]; // saved before multi-select
 let stats = load(STATS_KEY, []);
 const history = []; // this session: {spot, choice, correct, cost}
 
@@ -57,6 +58,26 @@ const handsWord = (n) => `${n} ${plural(n, "раздача", "раздачи", "
 
 function positionsFor(n) { return POSITIONS.slice(-n); }
 
+const maxPlayers = () => Math.max(...settings.players);
+const playersText = () => [...settings.players].sort((a, b) => a - b).join(", ");
+
+/** Can Hero sit in the chosen position facing `kind` with n players? */
+function fits(n, kind) {
+  const pos = positionsFor(n);
+  const idx = pos.indexOf(settings.position);
+  if (settings.position !== "any" && idx === -1) return false;
+  if (kind === "open") return idx !== n - 1;
+  if (kind === "call") return idx !== 0;
+  if (kind === "overcall") return settings.overcalls && (idx === -1 || idx >= 2);
+  return true;
+}
+
+/** The selected player counts a spot can be dealt with under the current settings. */
+function playableCounts() {
+  return settings.players.filter((n) => fits(n, settings.kind) &&
+    (settings.stacks !== "history" || historyCounts[n]));
+}
+
 function bindSeg(id, getter, setter) {
   const el = $(id);
   el.addEventListener("click", (e) => {
@@ -72,23 +93,20 @@ function bindSeg(id, getter, setter) {
 
 function renderPositionButtons() {
   const el = $("setPosition");
-  const opts = ["any", ...positionsFor(settings.players)];
+  const opts = ["any", ...positionsFor(maxPlayers())];
   if (!opts.includes(settings.position)) settings.position = "any";
   el.innerHTML = opts.map((p) => `<button data-v="${p}">${p === "any" ? "Любая" : p}</button>`).join("");
 }
 
 function kindAllowed(kind) {
-  const idx = positionsFor(settings.players).indexOf(settings.position); // -1 for any position
-  if (kind === "open") return idx !== settings.players - 1;
-  if (kind === "call") return idx !== 0;
-  if (kind === "overcall") return settings.overcalls && (idx === -1 || idx >= 2);
-  return true;
+  return settings.players.some((n) => fits(n, kind));
 }
 
 function updateAvailability() {
   if (!overcallsAvailable) settings.overcalls = false;
-  if (!historyCounts[settings.players]) settings.stacks = "random";
-  $("setStacks").querySelector('[data-v="history"]').disabled = !historyCounts[settings.players];
+  const anyHistory = settings.players.some((n) => historyCounts[n]);
+  if (!anyHistory) settings.stacks = "random";
+  $("setStacks").querySelector('[data-v="history"]').disabled = !anyHistory;
   for (const b of document.querySelectorAll("#setKind button, #setKind2 button")) b.disabled = !kindAllowed(b.dataset.v);
   if (!kindAllowed(settings.kind)) settings.kind = "any";
 }
@@ -96,7 +114,23 @@ function updateAvailability() {
 const refreshers = [];
 function setupSettings() {
   renderPositionButtons();
-  refreshers.push(bindSeg("setPlayers", () => settings.players, (v) => { settings.players = +v; renderPositionButtons(); }));
+  // several player counts can be on at once; each spot gets one of them at random
+  $("setPlayers").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || b.disabled) return;
+    const n = +b.dataset.v;
+    if (settings.players.includes(n)) {
+      if (settings.players.length === 1) return; // keep at least one
+      settings.players = settings.players.filter((x) => x !== n);
+    } else {
+      settings.players = [...settings.players, n].sort((a, b) => a - b);
+    }
+    renderPositionButtons();
+    onSettingsChanged();
+  });
+  refreshers.push(() => {
+    for (const b of $("setPlayers").querySelectorAll("button")) b.classList.toggle("active", settings.players.includes(+b.dataset.v));
+  });
   refreshers.push(bindSeg("setPosition", () => settings.position, (v) => { settings.position = v; }));
   refreshers.push(bindSeg("setKind", () => settings.kind, (v) => { settings.kind = v; }));
   refreshers.push(bindSeg("setKind2", () => settings.kind, (v) => { settings.kind = v; }));
@@ -127,14 +161,15 @@ function refreshSettingsUI() {
   $("bbMax").value = settings.bbMax;
   $("setModel").value = settings.model;
   $("difficultyHint").textContent = DIFFICULTY_HINT[settings.difficulty];
-  const hands = historyCounts[settings.players] || 0;
+  const hands = settings.players.reduce((sum, n) => sum + (historyCounts[n] || 0), 0);
+  const who = `${playersText()} ${plural(maxPlayers(), "игрока", "игроков", "игроков")}`;
   $("stacksHint").textContent = !Object.keys(historyCounts).length
     ? "Нет истории рук в hh/hands."
     : settings.stacks === "history"
-      ? `Блайнды и стеки ваших раздач финального стола: ${handsWord(hands)} на ${settings.players} игроков. ` +
+      ? `Блайнды и стеки ваших раздач финального стола: ${handsWord(hands)} на ${who}. ` +
         "Вы можете сидеть на любом месте, которое подходит под позицию и стек."
-      : hands ? `Случайный уровень и стеки. В истории ${handsWord(hands)} на ${settings.players} игроков.`
-        : `Случайный уровень и стеки. В истории нет раздач на ${settings.players} игроков.`;
+      : hands ? `Случайный уровень и стеки. В истории ${handsWord(hands)} на ${who}.`
+        : `Случайный уровень и стеки. В истории нет раздач на ${who}.`;
   $("setOvercalls").checked = settings.overcalls;
   $("setOvercalls").disabled = !overcallsAvailable;
   $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable);
@@ -158,8 +193,10 @@ function spotParams() {
   const diff = settings.difficulty === "mix"
     ? ["easy", "medium", "hard"][Math.floor(Math.random() * 3)]
     : settings.difficulty;
+  const counts = playableCounts();
+  const players = counts.length ? counts[Math.floor(Math.random() * counts.length)] : settings.players[0];
   return new URLSearchParams({
-    players: settings.players, position: settings.position, kind: settings.kind,
+    players, position: settings.position, kind: settings.kind,
     bb_min: settings.bbMin, bb_max: settings.bbMax, difficulty: diff, model: settings.model,
     overcalls: settings.overcalls ? 1 : 0, stacks: settings.stacks,
   });
@@ -182,7 +219,7 @@ function startPrefetch() {
 }
 
 async function nextSpot() {
-  $("loadingHint").textContent = settings.overcalls && settings.players >= 6
+  $("loadingHint").textContent = settings.overcalls && maxPlayers() >= 6
     ? "С оверколлами на 6–9 игроках первый спот считается до минуты, дальше споты берутся из запаса. " +
       "Запас можно заполнить заранее: python -m trainer.fill"
     : "";
