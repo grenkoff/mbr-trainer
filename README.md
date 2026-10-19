@@ -80,6 +80,30 @@ iterations: about 1–2 seconds for 3–5 players. Later iterations weigh more i
 - `exploitability.py` measures how much a player would win per hand by best-responding to the
   solved ranges (`mbr/exploit.py`). Near zero means the ranges are an equilibrium of the model.
 
+### Reference solver
+
+`reference/` is a slow solver of the same game that shares no code with the main one. It drops the
+main solver's shortcuts:
+- any number of players can be all-in;
+- tied hands split the pot and the bounty;
+- the cards of all players, folded ones included, come from one deal, so card removal is exact.
+
+It samples a few million complete deals with its own hand evaluator and finds the equilibrium with
+CFR+ instead of fictitious play.
+
+```bash
+.venv/bin/python check_reference.py --players 3,4 --per-count 2   # ~15 min per 4-player spot
+```
+
+The reference is solved on one sample of deals. Both solutions are then scored on another sample,
+against opponents who play the reference ranges. For each decision the script prints what the main
+solver's range costs, in thousandths of a buy-in per hand, with its standard error. The sampled deals
+are cached in `build/reference/`.
+
+A decision reached in well under 1% of hands, such as an overcall behind a very tight shove, gets only
+a few dozen sampled deals per hand class. Its reference range is noise, and so are the ranges of the
+decisions that follow it, so the cost printed there means little.
+
 ## Hand history analysis
 
 Put GG hand histories into `hh/hands/` and tournament summaries into `hh/summaries/` (ignored by git).
