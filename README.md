@@ -59,13 +59,16 @@ The model:
 - the first player shoves or folds;
 - without overcalls one caller at most; with overcalls up to three players all-in, side pots included;
 - hands that tie split the pot and the bounty;
+- the cards of the players who folded (bunching), to first order. Folds make the hands that leave them
+  likely more likely for the players still in. Folded cards are dead for the board, which moves the
+  equities (`data/dead_169.f32`);
 - values are in buy-ins;
 - place prizes are 4/3/2 buy-ins with Malmuth-Harville ICM;
 - a knockout pays a mystery bounty of 0.945 buy-ins on average;
 - optionally, the future bounties are split in proportion to chips.
 
 With overcalls the solver starts from the solution without them and runs 40 more fictitious play
-iterations: about 0.3–3 seconds for 3–5 players, 15–25 for 9. Later iterations weigh more in the averaged strategies
+iterations: about 0.5–5 seconds for 3–5 players, 25–30 for 9. Later iterations weigh more in the averaged strategies
 (weight ~ t³), which converges far faster than the plain mean.
 
 ### Checks
@@ -129,8 +132,11 @@ On real stacks it found two shortcuts of the main model:
   chops survives, so this is worth more than the average. For a 4.7bb big blind calling a shove the
   model missed 0.01–0.035 BI per hand, the most with weak hands, which tie most often. Ties are now
   split, heads-up and 3-way, and the errors there are down to the sampling noise.
-- **Folded players' cards (bunching).** It does not remove them from the deck. With 6 players, its EV
-  gaps behind folds are off by 0.01–0.04 BI on average and up to 0.08 BI for some weak suited hands.
+- **Folded players' cards (bunching).** The model used to leave them in the deck. With 6 players its EV
+  gaps behind folds were off by 0.01–0.04 BI on average, up to 0.08 BI for some weak suited hands.
+  About two thirds of that came from the board, where folded low cards cannot come, and one third from
+  the ranges of the players still in. The model now takes both into account to first order. On 3-, 4-
+  and 6-player spots every decision is down to the sampling noise, overcalls included.
 
 ## Hand history analysis
 
@@ -150,7 +156,14 @@ python3 leaks.py build/decisions_bounty_overcalls.csv  # where the EV goes, by s
 ```bash
 gcc -O3 -o build/equity csrc/equity.c && build/equity 50000 > data/equity_169.txt
 build/equity 50000 ties > data/ties_169.txt    # the probabilities that two hands tie
+gcc -O3 -march=native -fopenmp -o build/dead csrc/dead.c && build/dead 50000 data/dead_169.f32
 ```
+
+`data/dead_169.f32` holds, for every class pair and card rank, how much one dead card of that rank moves
+the heads-up equity and the tie probability. A dead card dealt at random changes nothing, so this is
+measured against a random one. The solver adds these changes up over the expected cards of the folded
+hands. For 3-way all-ins it uses the part of the effect that can be split by hand
+(`mbr.ranges.dead_card_strength`, about 89% of it).
 
 `build/equity3.f32` (not in git, see Setup) holds the 3-way outcomes for all 169^3 class triples:
 card removal weight times the probability of each strength order, ties split evenly between the orders

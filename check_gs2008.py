@@ -6,6 +6,9 @@ This solves the same game with overcalls and compares the ranges hand by hand. I
 solutions in our model: the exploitability of the paper's strategies shows how far our model's
 equilibrium is from theirs, independently of which hands differ.
 
+The paper's game leaves out the cards of the players who folded, so the comparison does too
+(bunching=False); the last section shows how far they move the equilibrium.
+
     .venv/bin/python check_gs2008.py
 """
 
@@ -60,8 +63,8 @@ def strategy(solver, node):
                                                                                  tuple(key)]
 
 
-def with_strategies(strats):
-    s = Solver(table(), overcalls=True)
+def with_strategies(strats, bunching):
+    s = Solver(table(), overcalls=True, bunching=bunching)
     for t, (node, _) in NODES.items():
         strategy(s, node)[:] = strats[t]
     return s
@@ -90,10 +93,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--long", type=int, default=2000, help="multiway iterations of the long reference run")
     args = ap.parse_args()
-    paper = with_strategies(paper_strategies())
-    report("solver as used by the trainer (Rust, default schedule)", Solver(table(), overcalls=True).solve(), paper)
+    paper = with_strategies(paper_strategies(), bunching=False)
+    report("the paper's game (Rust, default schedule)",
+           Solver(table(), overcalls=True, bunching=False).solve(), paper)
     report(f"long run ({args.long} multiway iterations, numpy)",
-           Solver(table(), overcalls=True).solve_python(iterations=args.long), paper)
+           Solver(table(), overcalls=True, bunching=False).solve_python(iterations=args.long), paper)
+    report("with the folded players' cards, as the trainer plays (Rust)", Solver(table(), overcalls=True).solve(),
+           with_strategies(paper_strategies(), bunching=True))
 
 
 if __name__ == "__main__":

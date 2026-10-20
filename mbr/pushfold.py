@@ -7,7 +7,12 @@ Game model:
 - with overcalls the players behind the first caller may overcall, up to three players all-in in total
   (everybody after the overcaller folds); side pots are paid by the 3-way outcome tensor (mbr.equity3);
 - if everybody folds, the big blind wins the blinds and antes;
-- hands that tie split the pot and the bounty (mbr.ranges.tie_matrix, mbr.equity3.tie_tensors).
+- hands that tie split the pot and the bounty (mbr.ranges.tie_matrix, mbr.equity3.tie_tensors);
+- the cards of the players who folded (bunching), to first order: they make the ranges of the players
+  still in more likely to hold the hands that leave the folds likely, and they are dead for the board,
+  which moves the heads-up equities and ties (mbr.ranges.dead_card_effects); for 3-way all-ins each
+  hand's strength moves by mbr.ranges.dead_card_strength and the order probabilities by the smallest
+  change that moves the three pairs that much (mbr.equity3.pair_shift_orders).
 
 Values are in buy-ins:
 - ICM (Malmuth-Harville) on the place prizes;
@@ -27,7 +32,8 @@ import os
 
 from mbr import equity3, native
 from mbr.icm import icm
-from mbr.ranges import N_CLASSES, combo_counts, equity_matrix, pair_weights, tie_matrix
+from mbr.ranges import (N_CLASSES, combo_counts, dead_card_effects, dead_card_strength, equity_matrix, pair_weights,
+                        rank_counts, tie_matrix)
 
 PAYOUTS_BI = [4.0, 3.0, 2.0]
 MEAN_BOUNTY_BI = 0.945
@@ -36,6 +42,7 @@ WARM_START_WEIGHT = 1
 WARM_START_MIN_FREQ = 0.02
 MULTIWAY_MIN_FREQ = 0.03
 MULTIWAY_ITERATIONS = 40
+COMBOS = 1326
 # iteration t enters the average with weight ~ t^(AVERAGING - 1); 1 is plain fictitious play
 AVERAGING = 4
 
@@ -108,13 +115,13 @@ class Table:
 
 
 class Solver:
-    def __init__(self, table, overcalls=False):
+    def __init__(self, table, overcalls=False, bunching=True):
         self.t = table
         m = table.m
         self.overcalls = overcalls and m >= 3
+        self.bunching = bunching
         self.W = pair_weights()
-        self.WE = self.W * equity_matrix()
-        self.WT = self.W * tie_matrix()
+        self.E, self.T = equity_matrix(), tie_matrix()
         self.Wsum = self.W.sum(axis=1)
         self.cc = combo_counts()
         # terminal values (vectors over players)
@@ -155,22 +162,68 @@ class Solver:
         self._slices = {}
         self.D_all = equity3.order_mass().reshape(N_CLASSES, N_CLASSES)  # sum_c W3[a, b, c]
         self.W32 = self.W.astype(np.float32)
-        E, T = equity_matrix(), tie_matrix()
-        # heads-up showdown values of every player over the (shover hand, caller hand) grid: shape (m, n, n)
-        self.hu = {(i, j): (np.multiply.outer(self.v_iwin[i, j], E)
-                            + np.multiply.outer(self.v_jwin[i, j], 1 - E)
-                            + np.multiply.outer(self.v_tie[i, j], T)).astype(np.float32)
-                   for (i, j) in self.call}
+
+    # --- folded players' cards ----------------------------------------------
+    def _fold_stats(self, fold):
+        """For a player folding the hands in `fold`: the expected number of cards of each rank he holds
+        when he folds, and phi[x] = P(he folds | another player holds x) / P(he folds)."""
+        mass = float(fold @ self.cc)
+        if not self.bunching or mass <= 1e-12:
+            return np.zeros(13), np.ones(N_CLASSES)
+        return (fold * self.cc) @ rank_counts() / mass, (self.W @ fold) / self.Wsum / (mass / COMBOS)
+
+    def _bunching(self):
+        """Who folded before each decision, as the weights and equities it is played with.
+
+        pair[i, j] = (W, E, T) when i shoved and j calls, given the players before i and between i and j
+        folded: W[a, b] times the folds' phi of a and b (phi[i, j]), the equities and ties moved by their
+        dead cards;
+        showdown[i, j] = (E, T) once everybody behind j folded too (with overcalls);
+        over[i, j, k] = phi of k's hands at the overcall node and strength[i, j, k] how much the dead cards
+        there move each hand (dead_card_strength); opener[i] = phi of i's hands when folded to."""
+        m = self.t.m
+        DE, DT = dead_card_effects()
+        stats = {}
+        for i in range(m - 1):
+            stats["push", i] = self._fold_stats(1 - self.push[i])
+        for key, c in self.call.items():
+            stats["call", *key] = self._fold_stats(1 - c)
+        for key, o in self.over.items():
+            stats["over", *key] = self._fold_stats(1 - o)
+
+        def combine(keys):
+            nu, phi = np.zeros(13), np.ones(N_CLASSES)
+            for key in keys:
+                nu, phi = nu + stats[key][0], phi * stats[key][1]
+            return nu, phi
+
+        out = {"pair": {}, "phi": {}, "showdown": {}, "over": {}, "strength": {},
+               "opener": [combine([("push", x) for x in range(i)])[1] for i in range(m)]}
+        for (i, j) in self.call:
+            before = [("push", x) for x in range(i)] + [("call", i, x) for x in range(i + 1, j)]
+            nu, phi = combine(before)
+            out["pair"][i, j] = (self.W * np.outer(phi, phi), self.E + DE @ nu, self.T + DT @ nu)
+            out["phi"][i, j] = phi
+            if self.over:
+                behind = [("over", i, j, x) for x in range(j + 1, m)]
+                nu_all = nu + combine(behind)[0]
+                out["showdown"][i, j] = (self.E + DE @ nu_all, self.T + DT @ nu_all)
+                for k in range(j + 1, m):
+                    nu_k, phi_k = combine([("over", i, j, x) for x in range(j + 1, k)])
+                    out["over"][i, j, k] = phi * phi_k
+                    out["strength"][i, j, k] = dead_card_strength() @ (nu + nu_k)
+        return out
 
     # --- range statistics -------------------------------------------------
-    def _caller_stats(self, i, j):
+    def _caller_stats(self, i, j, bunch=None):
         """Call probability, shover equity and tie probability for the j-call node, over i's range."""
+        W, E, T = (bunch or self._bunching())["pair"][i, j]
         p, c = self.push[i] + 1e-12, self.call[i, j]
-        wc = self.W @ c
-        cp = float(p @ wc / (p @ self.Wsum))
+        wc = W @ c
+        cp = float(p @ wc / (p @ W.sum(axis=1)))
         denom = float(p @ wc)
-        pwin = float(p @ (self.WE @ c) / denom) if denom > 1e-12 else 0.5
-        ptie = float(p @ (self.WT @ c) / denom) if denom > 1e-12 else 0.0
+        pwin = float(p @ ((W * E) @ c) / denom) if denom > 1e-12 else 0.5
+        ptie = float(p @ ((W * T) @ c) / denom) if denom > 1e-12 else 0.0
         return cp, pwin, ptie
 
     def _after_shove_value(self, i, from_j, cps, called):
@@ -226,13 +279,14 @@ class Solver:
             out[:, o] = (t @ sub.T).T
         return out
 
-    def _node_values(self, cps, called):
+    def _node_values(self, cps, called, bunch):
         """node[i] = value vector when it is folded to player i."""
         m = self.t.m
         node = [None] * m
         node[m - 1] = self.v_steal[m - 1]  # folded to the big blind: walk
         for i in range(m - 2, -1, -1):
-            ppush = float(self.push[i] @ self.cc / self.cc.sum())
+            w = self.cc * bunch["opener"][i]
+            ppush = float(self.push[i] @ w / w.sum())
             node[i] = ppush * self._after_shove_value(i, i + 1, cps, called) + (1 - ppush) * node[i + 1]
         return node
 
@@ -241,82 +295,104 @@ class Solver:
         if self.overcalls:
             return self._evaluate_multiway()
         m = self.t.m
-        stats = {(i, j): self._caller_stats(i, j) for (i, j) in self.call}
+        bunch = self._bunching()
+        stats = {(i, j): self._caller_stats(i, j, bunch) for (i, j) in self.call}
         cps = {key: cp for key, (cp, _, _) in stats.items()}
         called = {key: pwin * self.v_iwin[key] + (1 - pwin) * self.v_jwin[key] + ptie * self.v_tie[key]
                   for key, (_, pwin, ptie) in stats.items()}
-        node = self._node_values(cps, called)
+        node = self._node_values(cps, called, bunch)
 
         ev = {}
         for i in range(m - 1):
             # opener i with hand a
             ev_push = np.zeros(N_CLASSES)
             q = np.ones(N_CLASSES)
+            p = self.push[i] + 1e-12
             for j in range(i + 1, m):
+                W, E, T = bunch["pair"][i, j]
                 c = self.call[i, j]
-                wc = self.W @ c
-                callp = wc / self.Wsum
-                eqc = np.divide(self.WE @ c, wc, out=np.full(N_CLASSES, 0.5), where=wc > 1e-12)
-                tiec = np.divide(self.WT @ c, wc, out=np.zeros(N_CLASSES), where=wc > 1e-12)
+                wc = W @ c
+                callp = wc / W.sum(axis=1)
+                eqc = np.divide((W * E) @ c, wc, out=np.full(N_CLASSES, 0.5), where=wc > 1e-12)
+                tiec = np.divide((W * T) @ c, wc, out=np.zeros(N_CLASSES), where=wc > 1e-12)
                 ev_push += q * callp * (eqc * self.v_iwin[i, j][i] + (1 - eqc) * self.v_jwin[i, j][i]
                                         + tiec * self.v_tie[i, j][i])
                 q *= 1 - callp
-            ev_push += q * self.v_steal[i][i]
-            ev["push", i] = (ev_push, float(node[i + 1][i]))
-            # callers j facing i's shove with hand b
-            p = self.push[i] + 1e-12
-            wp = self.W @ p
-            eqp = (self.WE @ p) / wp  # equity of caller's hand b vs shover range
-            tiep = (self.WT @ p) / wp
-            for j in range(i + 1, m):
+                # caller j facing i's shove with hand b
+                wp = W @ p
+                eqp = ((W * E) @ p) / wp  # equity of caller's hand b vs shover range
+                tiep = ((W * T) @ p) / wp
                 ev_call = eqp * self.v_jwin[i, j][j] + (1 - eqp) * self.v_iwin[i, j][j] + tiep * self.v_tie[i, j][j]
                 ev_fold = float(self._after_shove_value(i, j + 1, cps, called)[j])
                 ev["call", i, j] = (ev_call, ev_fold)
+            ev_push += q * self.v_steal[i][i]
+            ev["push", i] = (ev_push, float(node[i + 1][i]))
         return ev
 
     def _evaluate_multiway(self):
         self._init_multiway()
         m, n = self.t.m, N_CLASSES
-        W, Wsum = self.W32, self.Wsum
+        bunch = self._bunching()
         f32 = lambda x: x.astype(np.float32)
         push = {i: f32(x) for i, x in self.push.items()}
         call = {key: f32(x) for key, x in self.call.items()}
+        pair_w = {key: f32(w) for key, (w, _, _) in bunch["pair"].items()}
         # the 3-way contractions skip hands left in a range only by early best responses
         prune = lambda x: np.where(x < MULTIWAY_MIN_FREQ, 0, x).astype(np.float32)
         keys = list(self.over)
-        marg = dict(zip(keys, self._order_marginals([prune(self.over[key]) for key in keys])))
+        marg = dict(zip(keys, self._order_marginals([prune(self.over[key]) * f32(bunch["over"][key])
+                                                     for key in keys])))
+        # dead cards in 3-way all-ins: the pair (u, v) of roles ends in the order u above v more often by
+        # strength[u's hand] - strength[v's hand], which moves the value of player x by
+        # sum over roles of alpha[role, x] * strength[the role's hand] (pair_shift_orders)
+        n_ord = len(equity3.ORDERS)
+        strength = {key: f32(bunch["strength"][key]) for key in keys}
+        alpha = {}
+        for key in keys:
+            g = equity3.pair_shift_orders().T @ self.v3[key][:n_ord]  # [pair (0,1), (0,2), (1,2), x]
+            alpha[key] = np.array([g[0] + g[1], g[2] - g[0], -g[1] - g[2]], dtype=np.float32)
+        mass = equity3.triple_counts()
+        over_strength = {key: (prune(self.over[key]) * f32(bunch["over"][key]) * strength[key]) @ mass
+                         for key in keys}  # [a * n + b] sum over c of W3 * over * phi * strength
         # R[i, j, k][x, a, b] = value of player x when i shoved with a, j called with b, j+1 .. k-1 folded
         # and k acts; R[i, j, m] is the heads-up showdown
         R, over_p = {}, {}
         for (i, j) in self.call:
-            cur = R[i, j, m] = self.hu[i, j]
+            E, T = bunch["showdown"][i, j]
+            cur = R[i, j, m] = (np.multiply.outer(self.v_iwin[i, j], E) + np.multiply.outer(self.v_jwin[i, j], 1 - E)
+                                + np.multiply.outer(self.v_tie[i, j], T)).astype(np.float32)
             for k in range(m - 1, j, -1):
                 s = marg[i, j, k]
                 # at most 1: rounding could push a full overcalling range over and make weights negative
-                over_p[i, j, k] = np.minimum(s[:len(equity3.ORDERS)].sum(axis=0) / self.D_all, 1.0)
-                cur = ((self.v3[i, j, k].T @ s.reshape(len(s), -1)).reshape(m, n, n) / self.D_all
-                       + (1 - over_p[i, j, k]) * cur)
+                over_mass = s[:n_ord].sum(axis=0)
+                over_p[i, j, k] = np.minimum(over_mass / self.D_all, 1.0)
+                al, st = alpha[i, j, k], strength[i, j, k]
+                shift = ((al[0][:, None, None] * st[None, :, None] + al[1][:, None, None] * st[None, None, :]) * over_mass
+                         + al[2][:, None, None] * over_strength[i, j, k].reshape(n, n))
+                cur = ((self.v3[i, j, k].T @ s.reshape(len(s), -1)).reshape(m, n, n) + shift) / self.D_all \
+                    + (1 - over_p[i, j, k]) * cur
                 R[i, j, k] = cur
 
-        cps = {key: self._caller_stats(*key)[0] for key in self.call}
+        cps = {key: self._caller_stats(*key, bunch)[0] for key in self.call}
         called = {}
         for (i, j) in self.call:
-            w = push[i][:, None] * W * call[i, j][None, :]
+            w = push[i][:, None] * pair_w[i, j] * call[i, j][None, :]
             called[i, j] = R[i, j, j + 1].reshape(m, -1) @ w.ravel() / max(w.sum(), 1e-12)
-        node = self._node_values(cps, called)
+        node = self._node_values(cps, called, bunch)
 
         ev = {}
         for i in range(m - 1):
             ev_push = np.zeros(n)
             q = np.ones(n)
             for j in range(i + 1, m):
+                W = pair_w[i, j]
                 wc = W * call[i, j][None, :]
-                ev_push += q * (wc * R[i, j, j + 1][i]).sum(axis=1) / Wsum
-                q *= 1 - wc.sum(axis=1) / Wsum
+                ev_push += q * (wc * R[i, j, j + 1][i]).sum(axis=1) / W.sum(axis=1)
+                q *= 1 - wc.sum(axis=1) / W.sum(axis=1)
             ev_push += q * self.v_steal[i][i]
             ev["push", i] = (ev_push, float(node[i + 1][i]))
-            wp = W * (push[i] + 1e-12)[:, None]
             for j in range(i + 1, m):
+                wp = pair_w[i, j] * (push[i] + 1e-12)[:, None]
                 ev_call = (wp * R[i, j, j + 1][j]).sum(axis=0) / wp.sum(axis=0)
                 ev_fold = float(self._after_shove_value(i, j + 1, cps, called)[j])
                 ev["call", i, j] = (ev_call, ev_fold)
@@ -326,13 +402,17 @@ class Solver:
             reach = np.ones((n, n), dtype=np.float32)  # everybody between the caller and k folded
             for kk in range(j + 1, k):
                 reach = reach * (1 - over_p[i, j, kk])
-            mat = np.outer(prune(push[i]), prune(call[i, j])) * reach
+            phi = f32(bunch["phi"][i, j])
+            mat = np.outer(prune(push[i]) * phi, prune(call[i, j]) * phi) * reach
             mats.append(mat)
-            w = W * mat
+            w = self.W32 * mat
             folds.append(float((w * R[i, j, k + 1][k]).sum() / max(w.sum(), 1e-12)))
         sums = self._overcaller_sums(np.array(mats))
         for t, (i, j, k) in enumerate(keys):
-            num, den = self.v3[i, j, k][:, k] @ sums[t], sums[t][:len(equity3.ORDERS)].sum(axis=0)
+            al, st = alpha[i, j, k][:, k], strength[i, j, k]
+            shifted = mats[t] * (al[0] * st[:, None] + al[1] * st[None, :])
+            den = sums[t][:n_ord].sum(axis=0)
+            num = self.v3[i, j, k][:, k] @ sums[t] + mass @ shifted.ravel() + al[2] * st * den
             ev_over = np.divide(num, den, out=np.full(n, folds[t] - 1.0), where=den > 1e-9)
             ev["over", i, j, k] = (ev_over, folds[t])
         return ev
@@ -356,8 +436,9 @@ class Solver:
             m, self.W, equity_matrix(), tie_matrix(), self.cc, np.array(self.v_steal),
             [self.v_iwin[p] for p in pairs], [self.v_jwin[p] for p in pairs], [self.v_tie[p] for p in pairs],
             [self.v3[t] for t in triples],
-            equity3.order_tensors() + equity3.tie_tensors() if self.overcalls else None,
-            equity3.order_mass() if self.overcalls else None, params)
+            equity3.order_tensors() + equity3.tie_tensors() + (equity3.triple_counts(),) if self.overcalls else None,
+            equity3.order_mass() if self.overcalls else None,
+            (*dead_card_effects(), rank_counts(), dead_card_strength()) if self.bunching else None, params)
         self.ev = {}
         nodes = [("push", self.push, i) for i in self.push] + [("call", self.call, p) for p in pairs] \
             + [("over", self.over, t) for t in triples]

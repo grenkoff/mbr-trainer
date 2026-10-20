@@ -66,6 +66,23 @@ def tie_tensors():
     return tuple(out)
 
 
+@lru_cache(maxsize=1)
+def triple_counts():
+    """The combo triple count W3 laid out like order_tensors() (the sum of the six)."""
+    return sum(order_tensors())
+
+
+@lru_cache(maxsize=1)
+def pair_shift_orders():
+    """C[o, p]: how the probability of strict order o moves when the probability that the first role of
+    pair p ends above the second moves by 1, for the pairs (0, 1), (0, 2), (1, 2) of roles; the
+    smallest change of the six order probabilities that moves the three pairs as given."""
+    pairs = [(0, 1), (0, 2), (1, 2)]
+    s = np.array([[1.0 if o.index(u) < o.index(v) else -1.0 for u, v in pairs] for o in ORDERS])
+    above = (s > 0).T.astype(float)  # [pair, order]: the order has the pair's first role above
+    return s @ np.linalg.inv(above @ s)
+
+
 def fitting_orders(groups):
     """The strict orders (indices into ORDERS) that a tied outcome fits."""
     rank = {r: k for k, g in enumerate(groups) for r in g}

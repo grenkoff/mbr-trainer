@@ -10,6 +10,7 @@ SUITS = "cdhs"
 N_CLASSES = 169
 EQUITY_FILE = Path(__file__).resolve().parent.parent / "data" / "equity_169.txt"
 TIES_FILE = Path(__file__).resolve().parent.parent / "data" / "ties_169.txt"
+DEAD_FILE = Path(__file__).resolve().parent.parent / "data" / "dead_169.f32"
 
 
 def class_label(cls):
@@ -77,6 +78,37 @@ def equity_matrix():
 def tie_matrix():
     """T[a, b] = probability that class a and class b tie all-in (counted as half a win in E)."""
     return np.loadtxt(TIES_FILE)
+
+
+@lru_cache(maxsize=1)
+def dead_card_effects():
+    """(DE, DT), each [a, b, r]: how much one dead card of rank r (grid order, 0 = Ace) changes the
+    equity and the tie probability of class a vs class b, built by csrc/dead.c. With dead cards from
+    folded hands, E[a, b] + DE[a, b] @ nu is about the equity, nu[r] = expected dead cards of rank r."""
+    d = np.fromfile(DEAD_FILE, dtype=np.float32).reshape(2, N_CLASSES, N_CLASSES, 13).astype(float)
+    return d[0], d[1]
+
+
+@lru_cache(maxsize=1)
+def dead_card_strength():
+    """H[c, r]: a dead card of rank r moves the equity of class a vs class b by about H[a, r] - H[b, r]
+    (least squares over DE weighted by the combo pairs, about 89% of it), for 3-way all-ins."""
+    de = dead_card_effects()[0]
+    w = pair_weights().copy()
+    np.fill_diagonal(w, 0)
+    laplacian = np.diag(w.sum(axis=1)) - w
+    h = np.linalg.lstsq(laplacian, np.einsum("ab,abr->ar", w, de), rcond=None)[0]
+    return h - h.mean(axis=0)
+
+
+@lru_cache(maxsize=1)
+def rank_counts():
+    """K[c, r] = number of cards of rank r (grid order) in a hand of class c."""
+    k = np.zeros((N_CLASSES, 13))
+    for c in range(N_CLASSES):
+        for card in class_combos(c)[0]:
+            k[c, RANKS.index(card[0])] += 1
+    return k
 
 
 def range_grid(freqs, fmt="{:>4}"):

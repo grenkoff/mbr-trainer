@@ -26,14 +26,16 @@ def _lib():
     lib.mbr_solve.restype = ctypes.c_int
     lib.mbr_solve.argtypes = [
         ctypes.c_size_t, _f64, _f64, _f64, _f64, _f64, _f64, _f64, _f64, _f64,
-        ctypes.c_void_p, ctypes.c_void_p, _f64, _f64, _f64, _f64, ctypes.c_int,
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        _f64, _f64, _f64, _f64, ctypes.c_int,
     ]
     return lib
 
 
-def solve(m, w, eq, tie, cc, v_steal, v_iwin, v_jwin, v_tie, v3, tensors, d_all, params, strategies=None):
+def solve(m, w, eq, tie, cc, v_steal, v_iwin, v_jwin, v_tie, v3, tensors, d_all, dead, params, strategies=None):
     """Run the solver; returns (strategies, ev_play, ev_fold) over the decision nodes: shoves (m - 1),
-    first calls (one per pair), overcalls (one per triple, only with tensors).
+    first calls (one per pair), overcalls (one per triple, only with tensors). `tensors` are the 13 outcome
+    tensors and the combo triple count; `dead` is (DE, DT, rank counts, dead-card strength) or None.
 
     With `strategies` (nodes x 169) only evaluate them instead of solving."""
     n = N_CLASSES
@@ -54,10 +56,14 @@ def solve(m, w, eq, tie, cc, v_steal, v_iwin, v_jwin, v_tie, v3, tensors, d_all,
     else:
         t3_ptr = d_ptr = None
     v3_arr = arr(v3).reshape(-1) if nt else np.zeros(1)
+    if dead is not None:
+        dead = [arr(x).reshape(-1) for x in dead]
+        keep.append(dead)
+    dead_ptrs = [x.ctypes.data for x in dead] if dead is not None else [None] * 4
     code = _lib().mbr_solve(
         m, arr(w), arr(eq), arr(tie), arr(cc), arr(v_steal), arr(v_iwin).reshape(-1), arr(v_jwin).reshape(-1),
         arr(v_tie).reshape(-1), v3_arr,
-        t3_ptr, d_ptr, arr(params), strategy, ev_play, ev_fold, int(strategies is not None),
+        t3_ptr, d_ptr, *dead_ptrs, arr(params), strategy, ev_play, ev_fold, int(strategies is not None),
     )
     if code != 0:
         raise RuntimeError(f"mbr_solve failed with code {code}")

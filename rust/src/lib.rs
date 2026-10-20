@@ -2,7 +2,7 @@
 
 mod solver;
 
-use solver::{Game, Multiway, Params, N, NN, OUTCOMES};
+use solver::{Dead, Game, Multiway, Params, N, NN, OUTCOMES, RANKS};
 use std::slice;
 
 /// Solve a final-table push/fold game.
@@ -15,9 +15,11 @@ use std::slice;
 /// - `v_tie`: per pair, the values of a tie minus the mean of `v_iwin` and `v_jwin`;
 /// - `v3`: per triple (i, j, k) in the same order, 13 x m values: for each strength order, then for each
 ///   tie the value of the tie minus the mean value of the orders it fits;
-/// - `t3`: 13 pointers to the f32 outcome tensors (169 x 169*169), the orders first, and `d_all`
-///   (f32, 169*169), or null
-///   for no overcalls;
+/// - `t3`: 14 pointers to the f32 tensors (169 x 169*169): the 13 outcomes, the orders first, then the
+///   combo triple count; and `d_all` (f32, 169*169); or null for no overcalls;
+/// - `de`, `dt`: 169*169 x 13 equity and tie changes per dead card of each rank, `ranks`: 169 x 13 cards
+///   of each rank per class, `strength`: 169 x 13 per-hand part of `de`; or `de` null to leave the folded
+///   players' cards out;
 /// - `params`: hu_iterations, tol, mw_iterations, warm_weight, warm_min_freq, mw_min_freq, threads, averaging.
 ///
 /// Outputs: strategies per decision node (shoves, first calls, overcalls, 169 values each), and
@@ -25,7 +27,8 @@ use std::slice;
 /// With `evaluate_only`, `out_strategy` holds strategies to evaluate once instead of solving.
 ///
 /// # Safety
-/// Every pointer must point to an array of the size given above (`t3` and `d_all` may be null).
+/// Every pointer must point to an array of the size given above (`t3`, `d_all` and the dead-card
+/// arrays may be null).
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn mbr_solve(
@@ -41,6 +44,10 @@ pub unsafe extern "C" fn mbr_solve(
     v3: *const f64,
     t3: *const *const f32,
     d_all: *const f32,
+    de: *const f64,
+    dt: *const f64,
+    ranks: *const f64,
+    strength: *const f64,
     params: *const f64,
     out_strategy: *mut f64,
     out_ev_play: *mut f64,
@@ -54,11 +61,22 @@ pub unsafe extern "C" fn mbr_solve(
     let multiway = !t3.is_null() && !d_all.is_null() && m >= 3;
     let nt = if multiway { m * (m - 1) * (m - 2) / 6 } else { 0 };
     let mw = if multiway {
-        let ptrs = slice::from_raw_parts(t3, OUTCOMES);
+        let ptrs = slice::from_raw_parts(t3, OUTCOMES + 1);
         let t: [&[f32]; OUTCOMES] = std::array::from_fn(|o| slice::from_raw_parts(ptrs[o], N * NN));
-        Some(Multiway { t, d_all: slice::from_raw_parts(d_all, NN) })
+        let mass = slice::from_raw_parts(ptrs[OUTCOMES], N * NN);
+        Some(Multiway { t, d_all: slice::from_raw_parts(d_all, NN), mass })
     } else {
         None
+    };
+    let dead = if de.is_null() {
+        None
+    } else {
+        Some(Dead {
+            de: slice::from_raw_parts(de, NN * RANKS),
+            dt: slice::from_raw_parts(dt, NN * RANKS),
+            ranks: slice::from_raw_parts(ranks, N * RANKS),
+            strength: slice::from_raw_parts(strength, N * RANKS),
+        })
     };
     let game = Game::new(
         m,
@@ -72,6 +90,7 @@ pub unsafe extern "C" fn mbr_solve(
         slice::from_raw_parts(v_tie, np * m),
         if nt > 0 { slice::from_raw_parts(v3, nt * OUTCOMES * m) } else { &[] },
         mw,
+        dead,
     );
     let pr = slice::from_raw_parts(params, 8);
     let threads = if pr[6] >= 1.0 {
@@ -96,7 +115,7 @@ pub unsafe extern "C" fn mbr_solve(
             (0..count).map(|r| strategy[(from + r) * N..(from + r + 1) * N].to_vec()).collect()
         };
         let s = solver::Strategies { push: rows(0, m - 1), call: rows(m - 1, np), over: rows(m - 1 + np, nt) };
-        let ev = game.evaluate(&s, nt > 0, params.threads, params.mw_min_freq);
+        let ev = game.evaluate(&s, nt > 0, params.threads, params.mw_min_freq, &mut solver::DeadCache::default());
         (s, ev)
     } else {
         solver::solve(&game, &params)
