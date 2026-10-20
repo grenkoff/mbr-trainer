@@ -123,6 +123,13 @@ of the main EV gap next to the sampling noise. It also lists the hands the main 
 more than 3 standard errors, and what they cost per hand dealt. It works for any number of players;
 with many players it takes long, so lower `--samples` or pick a `--decision`.
 
+On real stacks it shows two shortcuts of the main model:
+- **Split pots.** It values a tie as half a win and half a loss, but a short stack that chops survives.
+  For a 4.7bb big blind calling a shove this makes it miss 0.01–0.035 BI per hand, the most with weak
+  hands, which tie most often.
+- **Folded players' cards (bunching).** It does not remove them from the deck. With 6 players, its EV
+  gaps behind folds are off by 0.01–0.04 BI on average and up to 0.08 BI for some weak suited hands.
+
 ## Hand history analysis
 
 Put GG hand histories into `hh/hands/` and tournament summaries into `hh/summaries/` (ignored by git).
