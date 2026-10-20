@@ -20,7 +20,8 @@ use std::slice;
 /// - `de`, `dt`: 169*169 x 13 equity and tie changes per dead card of each rank, `ranks`: 169 x 13 cards
 ///   of each rank per class, `strength`: 169 x 13 per-hand part of `de`; or `de` null to leave the folded
 ///   players' cards out;
-/// - `params`: hu_iterations, tol, mw_iterations, warm_weight, warm_min_freq, mw_min_freq, threads, averaging.
+/// - `params`: hu_iterations, tol, mw_iterations, warm_weight, warm_min_freq, mw_min_freq, threads, averaging,
+///   forced_open (1 if the first player is all-in from posting and always shoves).
 ///
 /// Outputs: strategies per decision node (shoves, first calls, overcalls, 169 values each), and
 /// `ev_play` (169 per node) and `ev_fold` (one per node) in the same node order. Returns 0 on success.
@@ -92,7 +93,7 @@ pub unsafe extern "C" fn mbr_solve(
         mw,
         dead,
     );
-    let pr = slice::from_raw_parts(params, 8);
+    let pr = slice::from_raw_parts(params, 9);
     let threads = if pr[6] >= 1.0 {
         pr[6] as usize
     } else {
@@ -107,6 +108,7 @@ pub unsafe extern "C" fn mbr_solve(
         mw_min_freq: pr[5],
         threads,
         averaging: pr[7],
+        forced_open: pr[8] != 0.0,
     };
     let (s, ev) = if evaluate_only != 0 {
         // the strategies come in through out_strategy; evaluate them once

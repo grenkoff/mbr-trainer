@@ -56,13 +56,15 @@ class Table:
     payouts: list = field(default_factory=lambda: list(PAYOUTS_BI))
     bounty: float = MEAN_BOUNTY_BI
     future_bounty: bool = True
+    bunching: bool = True  # the solver takes the folded players' cards into account
 
     @property
     def m(self):
         return len(self.names)
 
-    def values(self, stacks_after, ko_winners=(), dead_order=None):
-        """ko_winners: (player, share of a bounty) for every bounty won in the hand."""
+    def values(self, stacks_after, ko_winners=(), dead_order=None, split=False):
+        """ko_winners: (player, share of a bounty) for every bounty won in the hand; split: the pot was
+        split between tied hands (mbr.fgs values those outcomes differently)."""
         v = np.array(icm(stacks_after, self.payouts, dead_order))
         for w, share in ko_winners:
             v[w] += share * self.bounty
@@ -111,15 +113,18 @@ class Table:
         busted = [x for x in rank if s[x] == 0]
         ko_winners = [(w, 1 / len(layer_winners[risk[x]])) for x in busted for w in layer_winners[risk[x]]]
         dead_order = sorted(busted, key=lambda x: -st[x]) if len(busted) > 1 else None
-        return self.values(s, ko_winners, dead_order)
+        return self.values(s, ko_winners, dead_order, split=any(len(g) > 1 for g in groups))
 
 
 class Solver:
-    def __init__(self, table, overcalls=False, bunching=True):
+    def __init__(self, table, overcalls=False, bunching=None, forced_open=False):
+        """forced_open: the first player is all-in from posting; he always "shoves" and the others can
+        only call him (mbr.fgs)."""
         self.t = table
         m = table.m
         self.overcalls = overcalls and m >= 3
-        self.bunching = bunching
+        self.bunching = table.bunching if bunching is None else bunching
+        self.forced_open = forced_open
         self.W = pair_weights()
         self.E, self.T = equity_matrix(), tie_matrix()
         self.Wsum = self.W.sum(axis=1)
@@ -136,7 +141,7 @@ class Solver:
                 self.v_tie[i, j] = table.allin_values([(i, j)]) - (self.v_iwin[i, j] + self.v_jwin[i, j]) / 2
         # strategies: push[i] for opener i (the big blind never opens), call[i, j] for j facing i's shove,
         # over[i, j, k] for k facing i's shove and j's call
-        self.push = {i: np.full(N_CLASSES, 0.5) for i in range(m - 1)}
+        self.push = {i: np.full(N_CLASSES, 1.0 if forced_open and i == 0 else 0.5) for i in range(m - 1)}
         self.call = {(i, j): np.full(N_CLASSES, 0.5) for i in range(m - 1) for j in range(i + 1, m)}
         self.over = {}
         # 3-way all-in values: for each strength order (equity3.ORDERS), then for each tie (equity3.TIES)
@@ -300,7 +305,7 @@ class Solver:
         cps = {key: cp for key, (cp, _, _) in stats.items()}
         called = {key: pwin * self.v_iwin[key] + (1 - pwin) * self.v_jwin[key] + ptie * self.v_tie[key]
                   for key, (_, pwin, ptie) in stats.items()}
-        node = self._node_values(cps, called, bunch)
+        node = self._node = self._node_values(cps, called, bunch)
 
         ev = {}
         for i in range(m - 1):
@@ -378,7 +383,7 @@ class Solver:
         for (i, j) in self.call:
             w = push[i][:, None] * pair_w[i, j] * call[i, j][None, :]
             called[i, j] = R[i, j, j + 1].reshape(m, -1) @ w.ravel() / max(w.sum(), 1e-12)
-        node = self._node_values(cps, called, bunch)
+        node = self._node = self._node_values(cps, called, bunch)
 
         ev = {}
         for i in range(m - 1):
@@ -417,6 +422,12 @@ class Solver:
             ev["over", i, j, k] = (ev_over, folds[t])
         return ev
 
+    def state_values(self):
+        """Each player's value at the start of the hand, before the cards are dealt, when everybody plays
+        the current strategies (numpy)."""
+        self.evaluate()
+        return self._node[0]
+
     def solve(self, iterations=None, tol=1e-4, warm_start=True, warm_weight=None):
         """Fictitious play. With overcalls the strategies start from the solution without overcalls,
         which counts as warm_weight iterations of the average, and the overcalls from a best response.
@@ -431,7 +442,7 @@ class Solver:
         m = self.t.m
         pairs, triples = list(self.call), list(self.over)
         params = [300, tol, MULTIWAY_ITERATIONS, WARM_START_WEIGHT, WARM_START_MIN_FREQ, MULTIWAY_MIN_FREQ,
-                  float(os.environ.get("MBR_THREADS", 0)), AVERAGING]
+                  float(os.environ.get("MBR_THREADS", 0)), AVERAGING, float(self.forced_open)]
         strategy, ev_play, ev_fold = native.solve(
             m, self.W, equity_matrix(), tie_matrix(), self.cc, np.array(self.v_steal),
             [self.v_iwin[p] for p in pairs], [self.v_jwin[p] for p in pairs], [self.v_tie[p] for p in pairs],
@@ -451,7 +462,7 @@ class Solver:
         """The numpy version of solve()."""
         offset = 0
         if self.overcalls and warm_start:
-            base = Solver(self.t).solve_python()
+            base = Solver(self.t, bunching=self.bunching, forced_open=self.forced_open).solve_python()
             # drop the hands that were (almost) never a best response so the ranges stay sparse
             clean = lambda x: np.where(x < WARM_START_MIN_FREQ, 0.0, x)
             self.push = {i: clean(x) for i, x in base.push.items()}
@@ -468,6 +479,8 @@ class Solver:
             for strat, name in strategies:
                 rate = 1.0 if offset and it == 0 and name == "over" else step
                 for key in strat:
+                    if self.forced_open and name == "push" and key == 0:
+                        continue
                     e = ev[(name, *key) if isinstance(key, tuple) else (name, key)]
                     d = rate * ((e[0] > e[1]).astype(float) - strat[key])
                     strat[key] += d

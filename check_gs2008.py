@@ -39,7 +39,7 @@ NAMES = {11: "BTN jam", 12: "SB call vs BTN", 13: "SB jam", 14: "BB call vs BTN"
 class ChipTable(Table):
     """Values are the chips each player ends with, in big blinds (a cash game)."""
 
-    def values(self, stacks_after, ko_winners=(), dead_order=None):
+    def values(self, stacks_after, ko_winners=(), dead_order=None, split=False):
         return np.array(stacks_after, dtype=float) / self.bb
 
 

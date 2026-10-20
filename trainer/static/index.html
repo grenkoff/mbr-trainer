@@ -22,7 +22,7 @@
       <button data-v="6">6</button><button data-v="7">7</button>
       <button data-v="8">8</button><button data-v="9">9</button>
     </div>
-    <p class="hint">Можно выбрать несколько, каждая раздача возьмёт одно из них.</p>
+    <p class="hint" id="playersHint">Можно выбрать несколько, каждая раздача возьмёт одно из них.</p>
 
     <label class="field-label">Позиция</label>
     <div class="seg wrap" id="setPosition"></div>
@@ -63,10 +63,12 @@
 
     <label class="field-label">Модель</label>
     <select id="setModel">
+      <option value="hrc">Как HRC: FGS-1 + баунти</option>
       <option value="bounty">ICM + баунти + будущие баунти</option>
       <option value="bounty-now">ICM + баунти за нокаут</option>
       <option value="icm">Чистый ICM (без баунти)</option>
     </select>
+    <p class="hint" id="modelHint"></p>
 
     <label class="toggle" id="overcallsToggle">
       <input type="checkbox" id="setOvercalls"> Оверколлы

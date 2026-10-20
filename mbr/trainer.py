@@ -4,8 +4,9 @@ import random
 
 import numpy as np
 
-from mbr import equity3, real_stacks
-from mbr.pushfold import MEAN_BOUNTY_BI, Solver, Table
+from mbr import equity3, library, real_stacks
+from mbr.fgs import MODELS, table_for
+from mbr.pushfold import Solver
 from mbr.ranges import class_combos, class_label, combo_counts
 
 TOTAL_CHIPS = 18000
@@ -15,11 +16,6 @@ LEVELS = [
     (9, 150, 300, 60), (10, 200, 400, 80), (11, 300, 600, 120), (12, 400, 800, 160), (13, 500, 1000, 200),
 ]
 POSITIONS = ["UTG", "UTG1", "UTG2", "LJ", "HJ", "CO", "BTN", "SB", "BB"]
-MODELS = {
-    "bounty": dict(bounty=MEAN_BOUNTY_BI, future_bounty=True),
-    "bounty-now": dict(bounty=MEAN_BOUNTY_BI, future_bounty=False),
-    "icm": dict(bounty=0.0, future_bounty=False),
-}
 # cost of the mistake |EV(play) - EV(fold)| in buy-ins
 DIFFICULTY_BANDS = {"hard": (0.0, 0.03), "medium": (0.03, 0.10), "easy": (0.10, 100.0)}
 DIFFICULTIES = ["natural", *DIFFICULTY_BANDS]
@@ -55,11 +51,7 @@ def random_stacks(n, hero_idx, hero_bb, rng):
 
 
 def build_table(stacks, sb, bb, ante, model):
-    n = len(stacks)
-    posted = [ante] * n
-    posted[-1] += bb
-    posted[-2] += sb
-    return Table(names=positions(n), stacks=stacks, posted=posted, bb=bb, **MODELS[model])
+    return table_for(stacks, sb, bb, ante, model)
 
 
 def pick_hand(ev_diff, difficulty, rng, strict=True):
@@ -98,8 +90,12 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
 
     stacks: "random" stacks at a random blind level, or "history" for the blinds and stacks of a real
     final-table hand from the user's hand histories, with Hero in any seat that fits the settings.
+    model: see mbr.fgs.MODELS; "hrc" (as HoldemResources Calculator: FGS, at most three players all-in)
+    always has overcalls, and its history spots come from the library solved in advance (mbr.library).
     """
-    overcalls = str(overcalls).lower() in ("1", "true", "yes", "on")
+    if model not in MODELS:
+        raise ValueError(f"unknown model {model}")
+    overcalls = model in library.LIBRARY_MODELS or str(overcalls).lower() in ("1", "true", "yes", "on")
     if overcalls and not equity3.available():
         raise ValueError("overcalls need the 3-way equity tables: build/equity3.f32 and equity3_ties.f32 (see README)")
     if kind == "overcall" and not overcalls:
@@ -171,15 +167,19 @@ def _pick_decision(solver, hero_idx, kind, difficulty, rng, strict):
     return None
 
 
-def history_setup(n, hero_options, bb_min, bb_max, rng):
-    """A real final-table set-up with n players where Hero can sit in a seat that fits the settings."""
+def history_setup(n, hero_options, bb_min, bb_max, rng, solved=None):
+    """A real final-table set-up with n players where Hero can sit in a seat that fits the settings
+    (among the hand ids in `solved`, if given)."""
     fitting = []
     for snap in real_stacks.snapshots().get(n, []):
+        if solved is not None and snap["hand_id"] not in solved:
+            continue
         options = [(i, k) for i, k in hero_options if bb_min <= snap["stacks"][i] / snap["bb"] <= bb_max]
         if options:
             fitting.append((snap, options))
     if not fitting:
-        raise ValueError(f"no {n}-player hands in the history with a stack of {bb_min:g}-{bb_max:g} bb "
+        where = " solved for this model so far" if solved is not None else ""
+        raise ValueError(f"no {n}-player hands in the history{where} with a stack of {bb_min:g}-{bb_max:g} bb "
                          "in the chosen position")
     snap, options = rng.choice(fitting)
     return snap, rng.choice(options)
@@ -198,16 +198,20 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
     if not hero_options:
         raise ValueError(f"position {position} cannot face '{kind}' with {n} players")
     source = {"stacks": stacks_source}
+    from_library = model in library.LIBRARY_MODELS and stacks_source == "history"
     if stacks_source == "history":
-        snap, (hero_idx, kind) = history_setup(n, hero_options, float(bb_min), float(bb_max), rng)
+        solved = library.available(model) if from_library else None
+        snap, (hero_idx, kind) = history_setup(n, hero_options, float(bb_min), float(bb_max), rng, solved)
         level, sb, bb, ante, stacks = snap["level"], snap["sb"], snap["bb"], snap["ante"], list(snap["stacks"])
         source["hand_id"] = snap["hand_id"]
     else:
         hero_idx, kind = rng.choice(hero_options)
         hero_bb = rng.uniform(float(bb_min), float(bb_max))
         (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
-    table = build_table(stacks, sb, bb, ante, model)
-    solver = Solver(table, overcalls=overcalls).solve()
+    if from_library:
+        solver = library.load(snap, model)
+    else:
+        solver = Solver(build_table(stacks, sb, bb, ante, model), overcalls=overcalls).solve()
 
     # a solved table has more spots: other players in the stack range and other lines before them
     others = [(i, k) for i, k in hero_options

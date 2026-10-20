@@ -42,6 +42,8 @@ pub struct Params {
     pub threads: usize,
     /// iteration t enters the averaged strategies with weight ~ t^(averaging - 1)
     pub averaging: f64,
+    /// the first player is all-in from posting: he always shoves, the others can only call him
+    pub forced_open: bool,
 }
 
 /// The 3-way outcome tensors: `t[o][c * NN + a * N + b]` = combo weight * P(outcome o) for shover
@@ -1142,8 +1144,10 @@ fn fictitious_play(
         let ev = g.evaluate(s, multiway, p.threads, p.mw_min_freq, cache);
         let step = p.averaging / (it as f64 + p.averaging + 1.0 + offset);
         let mut delta: f64 = 0.0;
-        for (x, e) in s.push.iter_mut().zip(&ev.push) {
-            delta = delta.max(update(x, e, step));
+        for (i, (x, e)) in s.push.iter_mut().zip(&ev.push).enumerate() {
+            if !(p.forced_open && i == 0) {
+                delta = delta.max(update(x, e, step));
+            }
         }
         for (x, e) in s.call.iter_mut().zip(&ev.call) {
             delta = delta.max(update(x, e, step));
@@ -1166,6 +1170,9 @@ fn fictitious_play(
 /// Solve without overcalls; with them, continue from that solution as `mbr.pushfold.Solver.solve` does.
 pub fn solve(g: &Game, p: &Params) -> (Strategies, Ev) {
     let mut s = g.initial();
+    if p.forced_open {
+        s.push[0] = vec![1.0; N];
+    }
     let mut cache = DeadCache::default();
     fictitious_play(g, &mut s, false, p.hu_iterations, p.tol, 0.0, false, p, &mut cache);
     let multiway = g.mw.is_some() && !g.triples.is_empty();

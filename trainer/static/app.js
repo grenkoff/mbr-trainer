@@ -31,11 +31,17 @@ function save(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage unavailable */ }
 }
 
+// player counts the trainer offers for now: the HRC model is solved for 3 players first
+const ENABLED_PLAYERS = [3];
+// models served from the library solved in advance (mbr.library); they always have overcalls
+const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
-  { players: [5], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "bounty", overcalls: false, stacks: "random" },
+  { players: [3], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "hrc", overcalls: true, stacks: "history" },
   load(SETTINGS_KEY, {}),
 );
-if (!Array.isArray(settings.players)) settings.players = [+settings.players || 5]; // saved before multi-select
+if (!Array.isArray(settings.players)) settings.players = [+settings.players || 3]; // saved before multi-select
+settings.players = settings.players.filter((n) => ENABLED_PLAYERS.includes(n));
+if (!settings.players.length) settings.players = [ENABLED_PLAYERS[0]];
 let stats = load(STATS_KEY, []);
 const history = []; // this session: {spot, choice, correct, cost}
 
@@ -46,6 +52,13 @@ let prefetch = null;  // {key, promise}
 let spotSeq = 0;      // id of the latest nextSpot() call
 let overcallsAvailable = true;
 let historyCounts = {}; // players -> final-table hands in the user's hand histories
+let libraryCounts = {}; // model -> players -> of those, solved in advance
+
+const fromLibrary = () => LIBRARY_MODELS.includes(settings.model);
+/** players -> history hands a spot can come from with the current model */
+function usableHistory() {
+  return fromLibrary() ? (libraryCounts[settings.model] || {}) : historyCounts;
+}
 
 /* ---------------- settings UI ---------------- */
 
@@ -75,7 +88,7 @@ function fits(n, kind) {
 /** The selected player counts a spot can be dealt with under the current settings. */
 function playableCounts() {
   return settings.players.filter((n) => fits(n, settings.kind) &&
-    (settings.stacks !== "history" || historyCounts[n]));
+    (settings.stacks !== "history" || usableHistory()[n]));
 }
 
 function bindSeg(id, getter, setter) {
@@ -104,7 +117,8 @@ function kindAllowed(kind) {
 
 function updateAvailability() {
   if (!overcallsAvailable) settings.overcalls = false;
-  const anyHistory = settings.players.some((n) => historyCounts[n]);
+  if (fromLibrary() && overcallsAvailable) settings.overcalls = true;
+  const anyHistory = settings.players.some((n) => usableHistory()[n]);
   if (!anyHistory) settings.stacks = "random";
   $("setStacks").querySelector('[data-v="history"]').disabled = !anyHistory;
   for (const b of document.querySelectorAll("#setKind button, #setKind2 button")) b.disabled = !kindAllowed(b.dataset.v);
@@ -113,6 +127,13 @@ function updateAvailability() {
 
 const refreshers = [];
 function setupSettings() {
+  for (const b of $("setPlayers").querySelectorAll("button")) {
+    if (!ENABLED_PLAYERS.includes(+b.dataset.v)) {
+      b.disabled = true;
+      b.title = "Пока недоступно";
+    }
+  }
+  $("playersHint").textContent = "Пока доступны только 3 игрока: остальные откроются позже.";
   renderPositionButtons();
   // several player counts can be on at once; each spot gets one of them at random
   $("setPlayers").addEventListener("click", (e) => {
@@ -162,19 +183,28 @@ function refreshSettingsUI() {
   $("setModel").value = settings.model;
   $("difficultyHint").textContent = DIFFICULTY_HINT[settings.difficulty];
   const hands = settings.players.reduce((sum, n) => sum + (historyCounts[n] || 0), 0);
+  const solved = settings.players.reduce((sum, n) => sum + (usableHistory()[n] || 0), 0);
   const who = `${playersText()} ${plural(maxPlayers(), "игрока", "игроков", "игроков")}`;
   $("stacksHint").textContent = !Object.keys(historyCounts).length
     ? "Нет истории рук в hh/hands."
     : settings.stacks === "history"
-      ? `Блайнды и стеки ваших раздач финального стола: ${handsWord(hands)} на ${who}. ` +
+      ? `Блайнды и стеки ваших раздач финального стола: ${handsWord(hands)} на ${who}` +
+        (fromLibrary() ? `, решено заранее ${solved}. ` : ". ") +
         "Вы можете сидеть на любом месте, которое подходит под позицию и стек."
-      : hands ? `Случайный уровень и стеки. В истории ${handsWord(hands)} на ${who}.`
-        : `Случайный уровень и стеки. В истории нет раздач на ${who}.`;
+      : (hands ? `Случайный уровень и стеки. В истории ${handsWord(hands)} на ${who}.`
+        : `Случайный уровень и стеки. В истории нет раздач на ${who}.`) +
+        (fromLibrary() ? " Каждый спот считается заново, это до минуты." : "");
+  $("modelHint").textContent = settings.model === "hrc"
+    ? "Как HoldemResources Calculator: пуш/фолд, до трёх игроков в олл-ине, модель FGS глубины 1 " +
+      "(исход раздачи оценивается по следующей раздаче, потом ICM), баунти 0,945 BI, " +
+      "карты сфолдивших не учитываются."
+    : "";
   $("setOvercalls").checked = settings.overcalls;
-  $("setOvercalls").disabled = !overcallsAvailable;
-  $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable);
+  $("setOvercalls").disabled = !overcallsAvailable || fromLibrary();
+  $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable || fromLibrary());
   $("overcallsHint").textContent = !overcallsAvailable
     ? "Нет таблицы эквити на троих (build/equity3.f32), см. README."
+    : fromLibrary() ? "В этой модели всегда до трёх игроков в олл-ине."
     : settings.overcalls
       ? "После пуша и колла игроки сзади могут оверколлить, до трёх игроков в олл-ине."
       : "Пуш получает максимум один колл.";
@@ -535,6 +565,7 @@ async function init() {
     const info = await (await fetch("/api/info")).json();
     overcallsAvailable = !!info.overcalls;
     historyCounts = info.history || {};
+    libraryCounts = info.library || {};
   } catch (e) {
     overcallsAvailable = false;
   }

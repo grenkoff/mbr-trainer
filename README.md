@@ -25,7 +25,7 @@ The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unle
 ```
 
 Settings:
-- number of players (3–9, several at once: each spot gets one of them);
+- number of players (for now only 3: the HRC model is solved player count by player count);
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
@@ -35,8 +35,15 @@ Settings:
   - as at the table: every one of the 1326 combos dealt with equal probability;
   - or by the cost of a mistake: easy more than 0.10 BI;
     medium 0.03–0.10 BI, hard less than 0.03 BI;
-- valuation model;
-- overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`).
+- valuation model: "as HRC" (the default, see below) or ICM with or without bounties;
+- overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`; always on in the HRC model).
+
+The HRC model serves history spots from a library solved in advance (`build/library/`), since it
+takes about half a minute per 3-player table:
+
+```bash
+.venv/bin/python build_library.py --players 3      # only the set-ups not solved yet: rerun after new hands
+```
 
 Hotkeys: `F` fold, `A` shove/call, `Space` next.
 
@@ -66,6 +73,22 @@ The model:
 - place prizes are 4/3/2 buy-ins with Malmuth-Harville ICM;
 - a knockout pays a mystery bounty of 0.945 buy-ins on average;
 - optionally, the future bounties are split in proportion to chips.
+
+### The HRC model
+
+The aim is the ranges HoldemResources Calculator (HRC) shows for push/fold with FGS (`mbr/fgs.py`,
+model "hrc"). What HRC does was gathered from its release notes and its developers' forum answers:
+- push/fold with at most three players all-in, exact equities;
+- the folded players' cards are left out, as in HRC's push/fold (only its Monte Carlo mode has them);
+- FGS of depth 1: every outcome of the hand is valued by one more hand. The button moves on, and the
+  same blinds and antes are posted. That hand is played as the push/fold equilibrium with ICM after it,
+  and each player's value at its start is what the outcome is worth. As in HRC, outcomes where the pot
+  is split are valued with ICM;
+- a player left with no more than his antes and blinds is all-in from posting in that next hand: he
+  always plays, and the others call him or fold;
+- mystery bounties as HRC's KO bounties of 0.945 BI. Future bounties are split by chips, and the
+  winner does not get his own bounty: 8 bounties for 9 players. In HRC that means a first prize of
+  4 − 0.945 BI with KO bounties of 0.945 BI.
 
 With overcalls the solver starts from the solution without them and runs 40 more fictitious play
 iterations: about 0.5–5 seconds for 3–5 players, 25–30 for 9. Later iterations weigh more in the averaged strategies

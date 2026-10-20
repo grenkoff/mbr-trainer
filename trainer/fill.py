@@ -18,7 +18,7 @@ def main():
     ap.add_argument("--bb-min", type=float, default=5)
     ap.add_argument("--bb-max", type=float, default=15)
     ap.add_argument("--difficulty", default="mix", help="natural, easy, medium, hard or mix (the last three)")
-    ap.add_argument("--model", default="bounty", choices=["bounty", "bounty-now", "icm"])
+    ap.add_argument("--model", default="bounty", choices=["hrc", "bounty", "bounty-now", "icm"])
     ap.add_argument("--overcalls", action="store_true")
     ap.add_argument("--stacks", default="random", choices=["random", "history"])
     ap.add_argument("--count", type=int, default=100, help="spots to have in stock for each difficulty")

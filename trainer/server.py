@@ -12,11 +12,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from mbr import equity3, real_stacks
+from mbr import equity3, library, real_stacks
 from trainer.pool import SpotPool
 
 STATIC = Path(__file__).resolve().parent / "static"
 SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls", "stacks"}
+
+
+def library_counts():
+    """{model: {players: history set-ups solved in advance}} for the models served from the library."""
+    out = {}
+    for model in library.LIBRARY_MODELS:
+        solved = library.available(model)
+        out[model] = {n: sum(s["hand_id"] in solved for s in snaps)
+                      for n, snaps in sorted(real_stacks.snapshots().items())}
+    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/api/info":
             self._json(200, {"overcalls": equity3.available(), "history": real_stacks.counts(),
-                             "pool": self.pool.status()})
+                             "library": library_counts(), "pool": self.pool.status()})
             return
         if url.path == "/api/spot":
             params = {k: v[0] for k, v in parse_qs(url.query).items() if k in SPOT_PARAMS}
