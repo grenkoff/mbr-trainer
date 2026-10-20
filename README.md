@@ -104,6 +104,25 @@ A decision reached in well under 1% of hands, such as an overcall behind a very 
 a few dozen sampled deals per hand class. Its reference range is noise, and so are the ranges of the
 decisions that follow it, so the cost printed there means little.
 
+### Targeted check of single decisions
+
+```bash
+.venv/bin/python check_decisions.py --hand BR1287900949                  # every decision, ~6 min for 4 players
+.venv/bin/python check_decisions.py 3.2 17.8 94.3 4.7 --decision "BB vs SB" --samples 100000
+```
+
+`check_decisions.py` checks the EVs the main solver reports, one decision at a time, rare ones included
+(`reference/targeted.py`). It deals only hands in which the decision is reached:
+- the deciding player gets each of the 169 hand classes in turn;
+- the players who acted before get hands from their main-solver ranges, all-in or folded;
+- the players behind and the board come from the rest of the deck.
+
+Card removal is exact and split pots are split. Everybody plays the main solver's ranges, and the script
+computes the exact EV of both actions for every hand class. For each decision it prints the mean error
+of the main EV gap next to the sampling noise. It also lists the hands the main range gets wrong by
+more than 3 standard errors, and what they cost per hand dealt. It works for any number of players;
+with many players it takes long, so lower `--samples` or pick a `--decision`.
+
 ## Hand history analysis
 
 Put GG hand histories into `hh/hands/` and tournament summaries into `hh/summaries/` (ignored by git).
