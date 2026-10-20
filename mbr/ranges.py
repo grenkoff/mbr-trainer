@@ -9,6 +9,7 @@ RANKS = "AKQJT98765432"  # grid order: index 0 = Ace
 SUITS = "cdhs"
 N_CLASSES = 169
 EQUITY_FILE = Path(__file__).resolve().parent.parent / "data" / "equity_169.txt"
+TIES_FILE = Path(__file__).resolve().parent.parent / "data" / "ties_169.txt"
 
 
 def class_label(cls):
@@ -70,6 +71,12 @@ def pair_weights():
 def equity_matrix():
     """E[a, b] = all-in equity of class a vs class b."""
     return np.loadtxt(EQUITY_FILE)
+
+
+@lru_cache(maxsize=1)
+def tie_matrix():
+    """T[a, b] = probability that class a and class b tie all-in (counted as half a win in E)."""
+    return np.loadtxt(TIES_FILE)
 
 
 def range_grid(freqs, fmt="{:>4}"):

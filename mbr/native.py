@@ -25,13 +25,13 @@ def _lib():
     lib = ctypes.CDLL(str(LIB_PATH))
     lib.mbr_solve.restype = ctypes.c_int
     lib.mbr_solve.argtypes = [
-        ctypes.c_size_t, _f64, _f64, _f64, _f64, _f64, _f64, _f64,
+        ctypes.c_size_t, _f64, _f64, _f64, _f64, _f64, _f64, _f64, _f64, _f64,
         ctypes.c_void_p, ctypes.c_void_p, _f64, _f64, _f64, _f64, ctypes.c_int,
     ]
     return lib
 
 
-def solve(m, w, eq, cc, v_steal, v_iwin, v_jwin, v3, tensors, d_all, params, strategies=None):
+def solve(m, w, eq, tie, cc, v_steal, v_iwin, v_jwin, v_tie, v3, tensors, d_all, params, strategies=None):
     """Run the solver; returns (strategies, ev_play, ev_fold) over the decision nodes: shoves (m - 1),
     first calls (one per pair), overcalls (one per triple, only with tensors).
 
@@ -55,7 +55,8 @@ def solve(m, w, eq, cc, v_steal, v_iwin, v_jwin, v3, tensors, d_all, params, str
         t3_ptr = d_ptr = None
     v3_arr = arr(v3).reshape(-1) if nt else np.zeros(1)
     code = _lib().mbr_solve(
-        m, arr(w), arr(eq), arr(cc), arr(v_steal), arr(v_iwin).reshape(-1), arr(v_jwin).reshape(-1), v3_arr,
+        m, arr(w), arr(eq), arr(tie), arr(cc), arr(v_steal), arr(v_iwin).reshape(-1), arr(v_jwin).reshape(-1),
+        arr(v_tie).reshape(-1), v3_arr,
         t3_ptr, d_ptr, arr(params), strategy, ev_play, ev_fold, int(strategies is not None),
     )
     if code != 0:

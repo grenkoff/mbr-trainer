@@ -8,7 +8,13 @@
  *
  * Output: 169^3 little-endian float32 values, x slowest, z fastest.
  *
- * Usage: equity3 <samples_per_class_triple> <output_file>
+ * With a second output file it also writes the ties, three tensors of the same shape one after another,
+ * with the same combo weight factor:
+ *   B[x][y][z]: the x and y hands tie for best, the z hand is worse;
+ *   L[x][y][z]: the x hand is best, the y and z hands tie for last;
+ *   A[x][y][z]: all three hands tie.
+ *
+ * Usage: equity3 <samples_per_class_triple> <output_file> [<ties_output_file>]
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -20,7 +26,24 @@
 
 static const int PERMS[6][3] = {{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}};
 
-static float *T;
+static float *T, *TB, *TL, *TA;
+
+/* permutations of a triple with repeated classes land on the same cell: average them */
+static void store(float *dst, const int cls[3], const double weight[6]) {
+    double sum[6] = {0};
+    int cnt[6] = {0}, cell[6];
+    for (int p = 0; p < 6; p++) {
+        cell[p] = (cls[PERMS[p][0]] * N + cls[PERMS[p][1]]) * N + cls[PERMS[p][2]];
+        for (int q = 0; q <= p; q++)
+            if (cell[q] == cell[p]) {
+                sum[q] += weight[p];
+                cnt[q]++;
+                break;
+            }
+    }
+    for (int p = 0; p < 6; p++)
+        if (cnt[p]) dst[cell[p]] = (float)(sum[p] / cnt[p]);
+}
 
 static void solve_triple(int x, int y, int z, long samples, uint64_t *rs) {
     int cls[3] = {x, y, z};
@@ -41,7 +64,7 @@ static void solve_triple(int x, int y, int z, long samples, uint64_t *rs) {
                 nt++;
             }
 
-    double order[6] = {0};
+    double order[6] = {0}, best_tie[6] = {0}, last_tie[6] = {0}, all_tie = 0;
     if (nt > 0) {
         int h[3][7];
         for (long s = 0; s < samples; s++) {
@@ -64,34 +87,51 @@ static void solve_triple(int x, int y, int z, long samples, uint64_t *rs) {
                 ok[p] = v[PERMS[p][0]] >= v[PERMS[p][1]] && v[PERMS[p][1]] >= v[PERMS[p][2]];
                 n_ok += ok[p];
             }
-            for (int p = 0; p < 6; p++)
+            for (int p = 0; p < 6; p++) {
                 if (ok[p]) order[p] += 1.0 / n_ok;
+                int x = v[PERMS[p][0]], y = v[PERMS[p][1]], z = v[PERMS[p][2]];
+                best_tie[p] += x == y && y > z;
+                last_tie[p] += x > y && y == z;
+            }
+            all_tie += v[0] == v[1] && v[1] == v[2];
         }
     }
 
-    /* permutations of a triple with repeated classes land on the same cell: average them */
-    double sum[6] = {0};
-    int cnt[6] = {0}, cell[6];
-    for (int p = 0; p < 6; p++) {
-        cell[p] = (cls[PERMS[p][0]] * N + cls[PERMS[p][1]]) * N + cls[PERMS[p][2]];
-        for (int q = 0; q <= p; q++)
-            if (cell[q] == cell[p]) {
-                sum[q] += nt > 0 ? nt * order[p] / samples : 0.0;
-                cnt[q]++;
-                break;
-            }
+    double scale = nt > 0 ? (double)nt / samples : 0.0, w[6];
+    for (int p = 0; p < 6; p++) w[p] = scale * order[p];
+    store(T, cls, w);
+    if (!TB) return;
+    for (int p = 0; p < 6; p++) w[p] = scale * best_tie[p];
+    store(TB, cls, w);
+    for (int p = 0; p < 6; p++) w[p] = scale * last_tie[p];
+    store(TL, cls, w);
+    for (int p = 0; p < 6; p++) w[p] = scale * all_tie;
+    store(TA, cls, w);
+}
+
+static int write_floats(const char *path, const float *data, size_t count) {
+    FILE *f = fopen(path, "wb");
+    if (!f || fwrite(data, sizeof(float), count, f) != count) {
+        perror(path);
+        return 1;
     }
-    for (int p = 0; p < 6; p++)
-        if (cnt[p]) T[cell[p]] = (float)(sum[p] / cnt[p]);
+    fclose(f);
+    return 0;
 }
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <samples_per_triple> <output_file>\n", argv[0]);
+        fprintf(stderr, "usage: %s <samples_per_triple> <output_file> [<ties_output_file>]\n", argv[0]);
         return 1;
     }
     long samples = atol(argv[1]);
-    T = calloc((size_t)N * N * N, sizeof(float));
+    size_t cells = (size_t)N * N * N;
+    T = calloc(cells, sizeof(float));
+    if (argc > 3) {
+        TB = calloc(3 * cells, sizeof(float));
+        TL = TB + cells;
+        TA = TB + 2 * cells;
+    }
     int done = 0;
 #pragma omp parallel
     {
@@ -107,11 +147,7 @@ int main(int argc, char **argv) {
         }
     }
     fprintf(stderr, "\n");
-    FILE *f = fopen(argv[2], "wb");
-    if (!f || fwrite(T, sizeof(float), (size_t)N * N * N, f) != (size_t)N * N * N) {
-        perror(argv[2]);
-        return 1;
-    }
-    fclose(f);
+    if (write_floats(argv[2], T, cells)) return 1;
+    if (TB && write_floats(argv[3], TB, 3 * cells)) return 1;
     return 0;
 }

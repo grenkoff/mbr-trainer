@@ -8,9 +8,9 @@ for GGPoker / PokerOK Mystery Battle Royale.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-# 3-way all-in table for overcalls (19 MB, a couple of minutes on 4 cores)
+# 3-way all-in tables for overcalls (19 + 58 MB, a couple of minutes on 4 cores)
 mkdir -p build
-gcc -O3 -march=native -fopenmp -o build/equity3 csrc/equity3.c && build/equity3 1000 build/equity3.f32
+gcc -O3 -march=native -fopenmp -o build/equity3 csrc/equity3.c && build/equity3 1000 build/equity3.f32 build/equity3_ties.f32
 # the Rust solver (optional, 2-6 times faster than numpy); without it the numpy version runs
 (cd rust && cargo build --release)
 ```
@@ -36,7 +36,7 @@ Settings:
   - or by the cost of a mistake: easy more than 0.10 BI;
     medium 0.03–0.10 BI, hard less than 0.03 BI;
 - valuation model;
-- overcalls on/off (needs `build/equity3.f32`).
+- overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`).
 
 Hotkeys: `F` fold, `A` shove/call, `Space` next.
 
@@ -58,13 +58,14 @@ can be filled in advance, also while the server runs:
 The model:
 - the first player shoves or folds;
 - without overcalls one caller at most; with overcalls up to three players all-in, side pots included;
+- hands that tie split the pot and the bounty;
 - values are in buy-ins;
 - place prizes are 4/3/2 buy-ins with Malmuth-Harville ICM;
 - a knockout pays a mystery bounty of 0.945 buy-ins on average;
 - optionally, the future bounties are split in proportion to chips.
 
 With overcalls the solver starts from the solution without them and runs 40 more fictitious play
-iterations: about 1–2 seconds for 3–5 players. Later iterations weigh more in the averaged strategies
+iterations: about 0.3–3 seconds for 3–5 players, 15–25 for 9. Later iterations weigh more in the averaged strategies
 (weight ~ t³), which converges far faster than the plain mean.
 
 ### Checks
@@ -123,10 +124,11 @@ of the main EV gap next to the sampling noise. It also lists the hands the main 
 more than 3 standard errors, and what they cost per hand dealt. It works for any number of players;
 with many players it takes long, so lower `--samples` or pick a `--decision`.
 
-On real stacks it shows two shortcuts of the main model:
-- **Split pots.** It values a tie as half a win and half a loss, but a short stack that chops survives.
-  For a 4.7bb big blind calling a shove this makes it miss 0.01–0.035 BI per hand, the most with weak
-  hands, which tie most often.
+On real stacks it found two shortcuts of the main model:
+- **Split pots.** The main model used to value a tie as half a win and half a loss. A short stack that
+  chops survives, so this is worth more than the average. For a 4.7bb big blind calling a shove the
+  model missed 0.01–0.035 BI per hand, the most with weak hands, which tie most often. Ties are now
+  split, heads-up and 3-way, and the errors there are down to the sampling noise.
 - **Folded players' cards (bunching).** It does not remove them from the deck. With 6 players, its EV
   gaps behind folds are off by 0.01–0.04 BI on average and up to 0.08 BI for some weak suited hands.
 
@@ -147,7 +149,9 @@ python3 leaks.py build/decisions_bounty_overcalls.csv  # where the EV goes, by s
 
 ```bash
 gcc -O3 -o build/equity csrc/equity.c && build/equity 50000 > data/equity_169.txt
+build/equity 50000 ties > data/ties_169.txt    # the probabilities that two hands tie
 ```
 
 `build/equity3.f32` (not in git, see Setup) holds the 3-way outcomes for all 169^3 class triples:
-card removal weight times the probability of each strength order.
+card removal weight times the probability of each strength order, ties split evenly between the orders
+they fit. `build/equity3_ties.f32` holds the ties: two hands tie for best, two tie for last, all three tie.

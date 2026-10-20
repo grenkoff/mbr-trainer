@@ -101,7 +101,7 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
     """
     overcalls = str(overcalls).lower() in ("1", "true", "yes", "on")
     if overcalls and not equity3.available():
-        raise ValueError("overcalls need the 3-way equity table: build/equity3.f32 (see README)")
+        raise ValueError("overcalls need the 3-way equity tables: build/equity3.f32 and equity3_ties.f32 (see README)")
     if kind == "overcall" and not overcalls:
         raise ValueError("overcall spots need overcalls enabled")
     if not 3 <= int(players) <= len(POSITIONS):

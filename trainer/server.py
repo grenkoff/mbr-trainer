@@ -70,7 +70,7 @@ def main():
     ap.add_argument("--workers", type=int, default=None, help="solver processes (default: CPU cores - 1)")
     args = ap.parse_args()
     if not equity3.available():
-        print(f"Overcalls are off: {equity3.EQUITY3_FILE} is missing (see README)")
+        print(f"Overcalls are off: {equity3.EQUITY3_FILE} or {equity3.TIES3_FILE.name} is missing (see README)")
     Handler.pool = SpotPool(workers=args.workers)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"Trainer running at http://localhost:{args.port}  ({Handler.pool.workers} solver processes, "

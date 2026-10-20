@@ -13,7 +13,10 @@ use std::time::Instant;
 
 pub const N: usize = 169;
 pub const NN: usize = N * N;
+/// Strict strength orders of the three all-in hands: their tensors add up to the combo triple count.
 pub const ORDERS: usize = 6;
+/// The orders and then the ties (`mbr.equity3.TIES`), whose tensors are corrections to the orders.
+pub const OUTCOMES: usize = 13;
 
 pub struct Params {
     pub hu_iterations: usize,
@@ -27,10 +30,10 @@ pub struct Params {
     pub averaging: f64,
 }
 
-/// The 3-way outcome tensor: `t[o][c * NN + a * N + b]` = combo weight * P(strength order o) for
-/// shover hand a, caller hand b and overcaller hand c; `d_all[a * N + b]` = sum over c and o.
+/// The 3-way outcome tensors: `t[o][c * NN + a * N + b]` = combo weight * P(outcome o) for shover
+/// hand a, caller hand b and overcaller hand c; `d_all[a * N + b]` = sum over c and the strict orders.
 pub struct Multiway<'a> {
-    pub t: [&'a [f32]; ORDERS],
+    pub t: [&'a [f32]; OUTCOMES],
     pub d_all: &'a [f32],
 }
 
@@ -38,21 +41,24 @@ pub struct Game<'a> {
     pub m: usize,
     w: &'a [f64],
     we: Vec<f64>,
+    wt: Vec<f64>,
     wsum: Vec<f64>,
     w32: Vec<f32>,
     eq32: Vec<f32>,
+    tie32: Vec<f32>,
     cc: &'a [f64],
     cc_sum: f64,
     v_steal: Vec<Vec<f64>>,
     pub pairs: Vec<(usize, usize)>,
     v_iwin: Vec<Vec<f64>>,
     v_jwin: Vec<Vec<f64>>,
+    v_tie: Vec<Vec<f64>>, // per pair: a tie minus the mean of a win and a loss (eq counts a tie as half a win)
     pub triples: Vec<(usize, usize, usize)>,
     pair_triples: Vec<Vec<usize>>, // for each pair (i, j): the triples (i, j, k) for k = j+1 .. m-1
     triple_pair: Vec<usize>,       // the pair (i, j) of each triple (i, j, k)
     v3: Vec<Vec<f32>>,             // per triple: v3[o * m + x] = value of player x for strength order o
     mw: Option<Multiway<'a>>,
-    minor: [usize; ORDERS], // the tensor that read as [a][b][c] is U_o, the overcaller's hand innermost
+    minor: [usize; OUTCOMES], // the tensor that read as [a][b][c] is U_o, the overcaller's hand innermost
 }
 
 /// Grid rows handled together in pass A, and the padded width of their columns.
@@ -61,17 +67,21 @@ const BLOCK_COLS: usize = (ROW_BLOCK * N).div_ceil(STRIP) * STRIP;
 /// N padded for `gemm`.
 const PAD_N: usize = N.div_ceil(STRIP) * STRIP;
 
-/// Strength orders of the roles (0 = shover, 1 = caller, 2 = overcaller), best first: `mbr.equity3.ORDERS`.
-const ORDER_ROLES: [[usize; 3]; ORDERS] = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+/// Place of the hand of each role (shover, caller, overcaller) in every outcome, 0 = best, tied hands
+/// sharing a place: the orders of `mbr.equity3.ORDERS`, then the ties of `mbr.equity3.TIES`.
+const OUTCOME_PLACES: [[usize; 3]; OUTCOMES] = [
+    [0, 1, 2], [0, 2, 1], [1, 0, 2], [2, 0, 1], [1, 2, 0], [2, 1, 0],
+    [0, 0, 1], [0, 1, 0], [1, 0, 0], [0, 1, 1], [1, 0, 1], [1, 1, 0], [0, 0, 0],
+];
 
-/// Tensor o holds T with its axes ordered (overcaller, shover, caller) for order o, where T[x][y][z] is
-/// the weight of x best, y second, z worst. Every axis order of T is one of the six tensors, so U_o
-/// with the axes (shover, caller, overcaller) is tensor `minor[o]`.
-fn minor_layouts() -> [usize; ORDERS] {
-    let pos = |o: usize, r: usize| ORDER_ROLES[o].iter().position(|&x| x == r).unwrap();
+/// Tensor o holds the weights of outcome o with the axes ordered (overcaller, shover, caller). Reading
+/// it with the axes (shover, caller, overcaller) gives the outcome where the roles have moved one place:
+/// the shover's place goes to the overcaller, the caller's to the shover, the overcaller's to the
+/// caller. So U_o with the axes (shover, caller, overcaller) is tensor `minor[o]`.
+fn minor_layouts() -> [usize; OUTCOMES] {
     std::array::from_fn(|o| {
-        let want = [pos(o, 0), pos(o, 1), pos(o, 2)];
-        (0..ORDERS).find(|&q| [pos(q, 2), pos(q, 0), pos(q, 1)] == want).unwrap()
+        let [s, c, v] = OUTCOME_PLACES[o];
+        (0..OUTCOMES).find(|&q| OUTCOME_PLACES[q] == [c, v, s]).unwrap()
     })
 }
 
@@ -205,10 +215,12 @@ impl<'a> Game<'a> {
         m: usize,
         w: &'a [f64],
         eq: &'a [f64],
+        tie: &'a [f64],
         cc: &'a [f64],
         v_steal: &[f64],
         v_iwin: &[f64],
         v_jwin: &[f64],
+        v_tie: &[f64],
         v3: &[f64],
         mw: Option<Multiway<'a>>,
     ) -> Self {
@@ -236,21 +248,25 @@ impl<'a> Game<'a> {
         let rows = |data: &[f64], len: usize, count: usize| -> Vec<Vec<f64>> {
             (0..count).map(|r| data[r * len..(r + 1) * len].to_vec()).collect()
         };
-        let v3 = rows(v3, ORDERS * m, triples.len());
+        let v3 = rows(v3, OUTCOMES * m, triples.len());
         let we: Vec<f64> = w.iter().zip(eq).map(|(a, b)| a * b).collect();
+        let wt: Vec<f64> = w.iter().zip(tie).map(|(a, b)| a * b).collect();
         let wsum = (0..N).map(|a| w[a * N..(a + 1) * N].iter().sum()).collect();
         Game {
             m,
             w,
             we,
+            wt,
             wsum,
             w32: w.iter().map(|&x| x as f32).collect(),
             eq32: eq.iter().map(|&x| x as f32).collect(),
+            tie32: tie.iter().map(|&x| x as f32).collect(),
             cc,
             cc_sum: cc.iter().sum(),
             v_steal: rows(v_steal, m, m),
             v_iwin: rows(v_iwin, m, pairs.len()),
             v_jwin: rows(v_jwin, m, pairs.len()),
+            v_tie: rows(v_tie, m, pairs.len()),
             v3: v3.iter().map(|r| r.iter().map(|&v| v as f32).collect()).collect(),
             pairs,
             triples,
@@ -274,14 +290,19 @@ impl<'a> Game<'a> {
         }
     }
 
-    /// Call probability and shover win probability at the first-caller node (i, j), over i's range.
-    fn caller_stats(&self, s: &Strategies, p: usize, wc: &[f64], wec: &[f64]) -> (f64, f64) {
-        let i = self.pairs[p].0;
-        let pe: Vec<f64> = s.push[i].iter().map(|x| x + 1e-12).collect();
+    /// Call probability at the first-caller node (i, j), over i's range.
+    fn call_prob(&self, s: &Strategies, p: usize, wc: &[f64]) -> f64 {
+        let pe: Vec<f64> = s.push[self.pairs[p].0].iter().map(|x| x + 1e-12).collect();
+        dot(&pe, wc) / dot(&pe, &self.wsum)
+    }
+
+    /// Call probability, shover equity and tie probability at the first-caller node (i, j), over i's range.
+    fn caller_stats(&self, s: &Strategies, p: usize, wc: &[f64], wec: &[f64], wtc: &[f64]) -> (f64, f64, f64) {
+        let pe: Vec<f64> = s.push[self.pairs[p].0].iter().map(|x| x + 1e-12).collect();
         let num = dot(&pe, wc);
-        let cp = num / dot(&pe, &self.wsum);
         let pwin = if num > 1e-12 { dot(&pe, wec) / num } else { 0.5 };
-        (cp, pwin)
+        let ptie = if num > 1e-12 { dot(&pe, wtc) / num } else { 0.0 };
+        (self.call_prob(s, p, wc), pwin, ptie)
     }
 
     /// Value vector after i shoves and the players before `from` have folded.
@@ -326,12 +347,15 @@ impl<'a> Game<'a> {
         let m = self.m;
         let wc: Vec<Vec<f64>> = s.call.iter().map(|c| matvec(self.w, c)).collect();
         let wec: Vec<Vec<f64>> = s.call.iter().map(|c| matvec(&self.we, c)).collect();
+        let wtc: Vec<Vec<f64>> = s.call.iter().map(|c| matvec(&self.wt, c)).collect();
         let mut cps = vec![0.0; self.pairs.len()];
         let mut called = vec![Vec::new(); self.pairs.len()];
         for p in 0..self.pairs.len() {
-            let (cp, pwin) = self.caller_stats(s, p, &wc[p], &wec[p]);
+            let (cp, pwin, ptie) = self.caller_stats(s, p, &wc[p], &wec[p], &wtc[p]);
             cps[p] = cp;
-            called[p] = (0..m).map(|x| pwin * self.v_iwin[p][x] + (1.0 - pwin) * self.v_jwin[p][x]).collect();
+            called[p] = (0..m)
+                .map(|x| pwin * self.v_iwin[p][x] + (1.0 - pwin) * self.v_jwin[p][x] + ptie * self.v_tie[p][x])
+                .collect();
         }
         let node = self.node_values(s, &cps, &called);
 
@@ -344,7 +368,10 @@ impl<'a> Game<'a> {
                 for a in 0..N {
                     let callp = wc[p][a] / self.wsum[a];
                     let eqc = if wc[p][a] > 1e-12 { wec[p][a] / wc[p][a] } else { 0.5 };
-                    ev_push[a] += q[a] * callp * (eqc * self.v_iwin[p][i] + (1.0 - eqc) * self.v_jwin[p][i]);
+                    let tiec = if wc[p][a] > 1e-12 { wtc[p][a] / wc[p][a] } else { 0.0 };
+                    ev_push[a] += q[a]
+                        * callp
+                        * (eqc * self.v_iwin[p][i] + (1.0 - eqc) * self.v_jwin[p][i] + tiec * self.v_tie[p][i]);
                     q[a] *= 1.0 - callp;
                 }
             }
@@ -356,12 +383,13 @@ impl<'a> Game<'a> {
             let pe: Vec<f64> = s.push[i].iter().map(|x| x + 1e-12).collect();
             let wp = matvec(self.w, &pe);
             let wep = matvec(&self.we, &pe);
+            let wtp = matvec(&self.wt, &pe);
             for j in i + 1..m {
                 let p = self.pair_index(i, j);
                 let ev_call = (0..N)
                     .map(|b| {
-                        let eqp = wep[b] / wp[b];
-                        eqp * self.v_jwin[p][j] + (1.0 - eqp) * self.v_iwin[p][j]
+                        let (eqp, tiep) = (wep[b] / wp[b], wtp[b] / wp[b]);
+                        eqp * self.v_jwin[p][j] + (1.0 - eqp) * self.v_iwin[p][j] + tiep * self.v_tie[p][j]
                     })
                     .collect();
                 let fold = self.after_shove(i, j + 1, &cps, &called)[j];
@@ -473,8 +501,7 @@ impl<'a> Game<'a> {
             );
         }
         let wc: Vec<Vec<f64>> = s.call.iter().map(|c| matvec(self.w, c)).collect();
-        let wec: Vec<Vec<f64>> = s.call.iter().map(|c| matvec(&self.we, c)).collect();
-        let cps: Vec<f64> = (0..np).map(|p| self.caller_stats(s, p, &wc[p], &wec[p]).0).collect();
+        let cps: Vec<f64> = (0..np).map(|p| self.call_prob(s, p, &wc[p])).collect();
         let called: Vec<Vec<f64>> = (0..np)
             .map(|p| acc.called[p].iter().map(|v| v / acc.called_w[p].max(1e-12)).collect())
             .collect();
@@ -495,9 +522,9 @@ impl<'a> Game<'a> {
             let fold = acc.fold_num[t] / acc.fold_den[t].max(1e-12);
             let ev_over = (0..N)
                 .map(|c| {
-                    let x = |o: usize| acc.x[(t * ORDERS + o) * N + c];
+                    let x = |o: usize| acc.x[(t * OUTCOMES + o) * N + c];
                     let den: f64 = (0..ORDERS).map(x).sum();
-                    let num: f64 = (0..ORDERS).map(|o| self.v3[t][o * m + k] as f64 * x(o)).sum();
+                    let num: f64 = (0..OUTCOMES).map(|o| self.v3[t][o * m + k] as f64 * x(o)).sum();
                     if den > 1e-9 { num / den } else { fold - 1.0 }
                 })
                 .collect();
@@ -528,7 +555,7 @@ impl Accumulators {
             called_w: vec![0.0; np],
             fold_num: vec![0.0; nt],
             fold_den: vec![0.0; nt],
-            x: vec![0.0; nt * ORDERS * N],
+            x: vec![0.0; nt * OUTCOMES * N],
             timing: [0.0; 3],
         }
     }
@@ -569,7 +596,7 @@ struct Workspace {
 impl Workspace {
     fn new(m: usize, nt: usize) -> Self {
         Workspace {
-            s: vec![0.0; round_up(nt, 4) * ORDERS * BLOCK_COLS],
+            s: vec![0.0; round_up(nt, 4) * OUTCOMES * BLOCK_COLS],
             pack: vec![0.0; N * BLOCK_COLS],
             pack_b: vec![0.0; N * PAD_N],
             mat_packed: PackedRows::default(),
@@ -609,12 +636,12 @@ impl RowContext<'_, '_> {
         // pass A: S[t][o][a][b] = sum_c over_t[c] U_o[a, b, c], a matrix product per order over the
         // overcalling hands, with the tensor rows of this block copied next to each other first
         let len = (a1 - a0) * N;
-        for o in 0..ORDERS {
+        for o in 0..OUTCOMES {
             for (ci, &c) in self.c_union.iter().enumerate() {
                 ws.pack[ci * BLOCK_COLS..ci * BLOCK_COLS + len]
                     .copy_from_slice(&mw.t[o][c * NN + a0 * N..c * NN + a1 * N]);
             }
-            gemm(self.over_packed, &ws.pack, BLOCK_COLS, BLOCK_COLS, &mut ws.s[o * BLOCK_COLS..], ORDERS * BLOCK_COLS);
+            gemm(self.over_packed, &ws.pack, BLOCK_COLS, BLOCK_COLS, &mut ws.s[o * BLOCK_COLS..], OUTCOMES * BLOCK_COLS);
         }
         acc.timing[0] += t_start.elapsed().as_secs_f64();
         for a in a0..a1 {
@@ -631,8 +658,9 @@ impl RowContext<'_, '_> {
         let r0 = a * N;
         let wrow = &g.w32[r0..r0 + N];
         let erow = &g.eq32[r0..r0 + N];
+        let trow = &g.tie32[r0..r0 + N];
         let inv_d: Vec<f32> = mw.d_all[r0..r0 + N].iter().map(|d| 1.0 / d).collect();
-        let sidx = |t: usize, o: usize| (t * ORDERS + o) * BLOCK_COLS + r * N;
+        let sidx = |t: usize, o: usize| (t * OUTCOMES + o) * BLOCK_COLS + r * N;
 
         let t_a = Instant::now();
         ws.active.clear();
@@ -668,12 +696,12 @@ impl RowContext<'_, '_> {
                 }
             }
             // backward recursion from the heads-up showdown to the player after the caller
-            let (vi, vj) = (&g.v_iwin[p], &g.v_jwin[p]);
+            let (vi, vj, vt) = (&g.v_iwin[p], &g.v_jwin[p], &g.v_tie[p]);
             for x in 0..m {
-                let (wi, wj) = (vi[x] as f32, vj[x] as f32);
+                let (wi, wj, wt) = (vi[x] as f32, vj[x] as f32, vt[x] as f32);
                 let cur = &mut ws.cur[x * N..(x + 1) * N];
                 for b in 0..N {
-                    cur[b] = wi * erow[b] + wj * (1.0 - erow[b]);
+                    cur[b] = wi * erow[b] + wj * (1.0 - erow[b]) + wt * trow[b];
                 }
             }
             for (n, &t) in tri.iter().enumerate().rev() {
@@ -694,7 +722,7 @@ impl RowContext<'_, '_> {
                     let cur = &mut ws.cur[x * N..(x + 1) * N];
                     cur.iter_mut().zip(op).for_each(|(c, o)| *c *= 1.0 - o);
                 }
-                for o in 0..ORDERS {
+                for o in 0..OUTCOMES {
                     let so = &ws.s[sidx(t, o)..sidx(t, o) + N];
                     ws.tmp.iter_mut().zip(so).zip(&inv_d).for_each(|((d, s), i)| *d = s * i);
                     for x in 0..m {
@@ -763,14 +791,14 @@ impl RowContext<'_, '_> {
                 self.call_support[g.triple_pair[t]].iter().map(|&b| (b_pos[b], mat[t * N + b])).collect()
             });
         }
-        for o in 0..ORDERS {
+        for o in 0..OUTCOMES {
             let layout = mw.t[g.minor[o]];
             for (bi, &b) in ws.b_union.iter().enumerate() {
                 ws.pack_b[bi * PAD_N..bi * PAD_N + N].copy_from_slice(&layout[a * NN + b * N..a * NN + b * N + N]);
             }
             gemm(&ws.mat_packed, &ws.pack_b, PAD_N, PAD_N, &mut ws.x_row, PAD_N);
             for (ti, &t) in ws.active.iter().enumerate() {
-                let dst = &mut acc.x[(t * ORDERS + o) * N..(t * ORDERS + o + 1) * N];
+                let dst = &mut acc.x[(t * OUTCOMES + o) * N..(t * OUTCOMES + o + 1) * N];
                 let src = &ws.x_row[ti * PAD_N..ti * PAD_N + N];
                 dst.iter_mut().zip(src).for_each(|(d, x)| *d += *x as f64);
             }

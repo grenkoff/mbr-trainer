@@ -2,17 +2,21 @@
 
 mod solver;
 
-use solver::{Game, Multiway, Params, N, NN, ORDERS};
+use solver::{Game, Multiway, Params, N, NN, OUTCOMES};
 use std::slice;
 
 /// Solve a final-table push/fold game.
 ///
 /// Players are in preflop order, m of them. Inputs (row-major, f64 unless noted):
-/// - `w`, `eq`: 169x169 card-removal pair weights and all-in equities; `cc`: combos per class;
+/// - `w`, `eq`, `tie`: 169x169 card-removal pair weights, all-in equities (a tie counts as half a win)
+///   and tie probabilities; `cc`: combos per class;
 /// - `v_steal`: m x m, row i = player values when i's shove takes the blinds;
 /// - `v_iwin`, `v_jwin`: per pair (i, j) in the order (0,1), (0,2), .., values when i or j wins;
-/// - `v3`: per triple (i, j, k) in the same order, 6 x m values for each strength order;
-/// - `t3`: 6 pointers to the f32 order tensors (169 x 169*169) and `d_all` (f32, 169*169), or null
+/// - `v_tie`: per pair, the values of a tie minus the mean of `v_iwin` and `v_jwin`;
+/// - `v3`: per triple (i, j, k) in the same order, 13 x m values: for each strength order, then for each
+///   tie the value of the tie minus the mean value of the orders it fits;
+/// - `t3`: 13 pointers to the f32 outcome tensors (169 x 169*169), the orders first, and `d_all`
+///   (f32, 169*169), or null
 ///   for no overcalls;
 /// - `params`: hu_iterations, tol, mw_iterations, warm_weight, warm_min_freq, mw_min_freq, threads, averaging.
 ///
@@ -28,10 +32,12 @@ pub unsafe extern "C" fn mbr_solve(
     m: usize,
     w: *const f64,
     eq: *const f64,
+    tie: *const f64,
     cc: *const f64,
     v_steal: *const f64,
     v_iwin: *const f64,
     v_jwin: *const f64,
+    v_tie: *const f64,
     v3: *const f64,
     t3: *const *const f32,
     d_all: *const f32,
@@ -48,8 +54,8 @@ pub unsafe extern "C" fn mbr_solve(
     let multiway = !t3.is_null() && !d_all.is_null() && m >= 3;
     let nt = if multiway { m * (m - 1) * (m - 2) / 6 } else { 0 };
     let mw = if multiway {
-        let ptrs = slice::from_raw_parts(t3, ORDERS);
-        let t: [&[f32]; ORDERS] = std::array::from_fn(|o| slice::from_raw_parts(ptrs[o], N * NN));
+        let ptrs = slice::from_raw_parts(t3, OUTCOMES);
+        let t: [&[f32]; OUTCOMES] = std::array::from_fn(|o| slice::from_raw_parts(ptrs[o], N * NN));
         Some(Multiway { t, d_all: slice::from_raw_parts(d_all, NN) })
     } else {
         None
@@ -58,11 +64,13 @@ pub unsafe extern "C" fn mbr_solve(
         m,
         slice::from_raw_parts(w, NN),
         slice::from_raw_parts(eq, NN),
+        slice::from_raw_parts(tie, NN),
         slice::from_raw_parts(cc, N),
         slice::from_raw_parts(v_steal, m * m),
         slice::from_raw_parts(v_iwin, np * m),
         slice::from_raw_parts(v_jwin, np * m),
-        if nt > 0 { slice::from_raw_parts(v3, nt * ORDERS * m) } else { &[] },
+        slice::from_raw_parts(v_tie, np * m),
+        if nt > 0 { slice::from_raw_parts(v3, nt * OUTCOMES * m) } else { &[] },
         mw,
     );
     let pr = slice::from_raw_parts(params, 8);
