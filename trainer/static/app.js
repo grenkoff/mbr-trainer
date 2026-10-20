@@ -315,7 +315,8 @@ function renderTable(spot) {
     if (act) {
       const a = document.createElement("div");
       a.className = `act ${act.action}`;
-      a.textContent = { fold: "фолд", allin: "ALL-IN", call: act.allin ? "КОЛЛ ALL-IN" : "КОЛЛ" }[act.action];
+      // push/fold has no flat calls: a caller who covers the shover is all-in over him
+      a.textContent = { fold: "фолд", allin: "ALL-IN", call: act.allin ? "КОЛЛ ALL-IN" : "ALL-IN" }[act.action];
       a.style[p.y < 50 ? "bottom" : "top"] = "-20px";
       el.appendChild(a);
     }
@@ -325,7 +326,9 @@ function renderTable(spot) {
     let chips = 0, cls = "chips";
     if (seat.position === "SB") chips = spot.sb / bb;
     if (seat.position === "BB") chips = 1;
-    if (act && act.action === "allin") { chips = seat.stack_bb - anteBB; cls += " allin"; }
+    if (act && (act.action === "allin" || (act.action === "call" && !act.allin))) {
+      chips = seat.stack_bb - anteBB; cls += " allin";
+    }
     else if (act && act.action === "call") { chips = act.amount_bb - anteBB; cls += " call"; }
     else pot += chips;
     if (chips > 0) {
@@ -368,8 +371,10 @@ function renderQuestion(spot) {
     const covered = [sh, ca].filter((x) => x.hero_covers).map((x) => x.position);
     const bounty = covered.length === 2 ? " Вы покрываете обоих — на кону два баунти."
       : covered.length === 1 ? ` Вы покрываете ${covered[0]}.` : " Оба покрывают вас.";
+    const callerAct = ca.stack > sh.stack
+      ? `пушит поверх ${fmtBB(ca.stack_bb)} bb` : "коллирует";
     $("question").innerHTML =
-      `<b>${sh.position}</b> пушит ${fmtBB(sh.stack_bb)} bb, <b>${ca.position}</b> коллирует.${bounty} Оверколл или фолд?`;
+      `<b>${sh.position}</b> пушит ${fmtBB(sh.stack_bb)} bb, <b>${ca.position}</b> ${callerAct}.${bounty} Оверколл или фолд?`;
     $("btnPlay").firstChild.textContent = "Колл ";
   }
 }
