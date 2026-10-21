@@ -356,27 +356,9 @@ function renderTable(spot) {
     (spot.source && spot.source.hand_id ? ` · раздача #${spot.source.hand_id}` : "");
 }
 
-function renderQuestion(spot) {
-  const hero = spot.seats[spot.hero];
-  if (spot.kind === "open") {
-    $("question").innerHTML = `Вы на <b>${hero.position}</b>, до вас все сфолдили. Пуш или фолд?`;
-    $("btnPlay").firstChild.textContent = "Пуш ";
-  } else if (spot.kind === "call") {
-    const sh = spot.seats[spot.shover];
-    const bounty = sh.hero_covers ? " Вы покрываете — на кону баунти." : " Он покрывает вас.";
-    $("question").innerHTML = `<b>${sh.position}</b> пушит ${fmtBB(sh.stack_bb)} bb.${bounty} Колл или фолд?`;
-    $("btnPlay").firstChild.textContent = "Колл ";
-  } else {
-    const sh = spot.seats[spot.shover], ca = spot.seats[spot.caller];
-    const covered = [sh, ca].filter((x) => x.hero_covers).map((x) => x.position);
-    const bounty = covered.length === 2 ? " Вы покрываете обоих — на кону два баунти."
-      : covered.length === 1 ? ` Вы покрываете ${covered[0]}.` : " Оба покрывают вас.";
-    const callerAct = ca.stack > sh.stack
-      ? `пушит поверх ${fmtBB(ca.stack_bb)} bb` : "коллирует";
-    $("question").innerHTML =
-      `<b>${sh.position}</b> пушит ${fmtBB(sh.stack_bb)} bb, <b>${ca.position}</b> ${callerAct}.${bounty} Оверколл или фолд?`;
-    $("btnPlay").firstChild.textContent = "Колл ";
-  }
+// the table shows what happened; the buttons are always fold and shove (calling an all-in is a shove too)
+function renderQuestion() {
+  $("question").innerHTML = "";
 }
 
 /* ---------------- answering ---------------- */
@@ -385,7 +367,7 @@ function showSpot(spot, ans) {
   current = spot;
   answered = ans;
   renderTable(spot);
-  renderQuestion(spot);
+  renderQuestion();
   $("btnFold").classList.toggle("chosen", !!ans && ans.choice === "fold");
   $("btnPlay").classList.toggle("chosen", !!ans && ans.choice === "play");
   $("btnFold").disabled = $("btnPlay").disabled = !!ans;
