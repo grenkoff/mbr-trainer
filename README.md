@@ -25,7 +25,7 @@ The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unle
 ```
 
 Settings:
-- number of players (for now only 3: the HRC model is solved player count by player count);
+- number of players (for now 3 and 4: the HRC model is solved player count by player count);
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
@@ -39,11 +39,14 @@ Settings:
 - overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`; always on in the HRC model).
 
 The HRC model serves history spots from a library solved in advance (`build/library/`), since it
-takes about half a minute per 3-player table:
+takes about half a minute per 3-player table and one to three minutes per 4-player one:
 
 ```bash
-.venv/bin/python build_library.py --players 3      # only the set-ups not solved yet: rerun after new hands
+.venv/bin/python build_library.py --players 3,4 --workers 1   # only the set-ups not solved yet: rerun after new hands
 ```
+
+The build pauses its workers while the CPU package is hotter than `--max-temp` (85 °C by default) and resumes
+them at `--resume-temp` (75 °C): a laptop running all cores flat out for hours can overheat and shut down.
 
 Hotkeys: `F` fold, `A` shove/call, `Space` next.
 

@@ -31,8 +31,8 @@ function save(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* storage unavailable */ }
 }
 
-// player counts the trainer offers for now: the HRC model is solved for 3 players first
-const ENABLED_PLAYERS = [3];
+// player counts the trainer offers for now: the HRC model is solved player count by player count
+const ENABLED_PLAYERS = [3, 4];
 // models served from the library solved in advance (mbr.library); they always have overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
@@ -133,7 +133,7 @@ function setupSettings() {
       b.title = "Пока недоступно";
     }
   }
-  $("playersHint").textContent = "Пока доступны только 3 игрока: остальные откроются позже.";
+  $("playersHint").textContent = "Пока доступны 3 и 4 игрока: остальные откроются позже.";
   renderPositionButtons();
   // several player counts can be on at once; each spot gets one of them at random
   $("setPlayers").addEventListener("click", (e) => {
