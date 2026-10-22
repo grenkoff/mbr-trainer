@@ -6,6 +6,7 @@ The solver processes are paused while the CPU is hotter than --max-temp and resu
 to --resume-temp: a long run at full load can overheat a laptop until it switches itself off.
 
     .venv/bin/python build_library.py --players 3            # HRC model: push/fold with FGS depth 1
+    .venv/bin/python build_library.py --players 3 --no-overcalls   # the same, a shove gets one call at most
 """
 
 import argparse
@@ -58,9 +59,9 @@ def _init_worker():
 
 
 def _solve(job):
-    snap, model = job
+    snap, model, overcalls = job
     start = time.monotonic()
-    library.save(library.solve(snap, model), snap, model)
+    library.save(library.solve(snap, model, overcalls), snap, model)
     return snap["hand_id"], len(snap["stacks"]), time.monotonic() - start
 
 
@@ -68,16 +69,18 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--players", default="3", help="player counts, e.g. 3 or 3,4")
     ap.add_argument("--model", default="hrc", choices=sorted(library.MODELS))
+    ap.add_argument("--no-overcalls", dest="overcalls", action="store_false",
+                    help="a shove gets one call at most (default: up to three players all-in)")
     ap.add_argument("--workers", type=int, default=None, help="solver processes (default: all cores)")
     ap.add_argument("--max-temp", type=float, default=85, help="pause above this CPU temperature, °C (0: never)")
     ap.add_argument("--resume-temp", type=float, default=75, help="resume at this CPU temperature, °C")
     args = ap.parse_args()
     snaps = real_stacks.snapshots()
-    done = library.available(args.model)
-    jobs = [(s, args.model) for n in map(int, args.players.split(",")) for s in snaps.get(n, [])
+    done = library.available(args.model, args.overcalls)
+    jobs = [(s, args.model, args.overcalls) for n in map(int, args.players.split(",")) for s in snaps.get(n, [])
             if s["hand_id"] not in done]
     total = sum(len(snaps.get(n, [])) for n in map(int, args.players.split(",")))
-    print(f"{args.model}: {total} set-ups, {total - len(jobs)} already solved, {len(jobs)} to solve", flush=True)
+    print(f"{library.variant(args.model, args.overcalls)}: {total} set-ups, {total - len(jobs)} already solved, {len(jobs)} to solve", flush=True)
     start = time.monotonic()
     stop = threading.Event()
     with Pool(args.workers, initializer=_init_worker) as pool:

@@ -50,8 +50,8 @@ def random_stacks(n, hero_idx, hero_bb, rng):
     raise ValueError("could not generate stacks for these settings")
 
 
-def build_table(stacks, sb, bb, ante, model):
-    return table_for(stacks, sb, bb, ante, model)
+def build_table(stacks, sb, bb, ante, model, overcalls=True):
+    return table_for(stacks, sb, bb, ante, model, overcalls)
 
 
 def pick_hand(ev_diff, difficulty, rng, strict=True):
@@ -90,14 +90,14 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
 
     stacks: "random" stacks at a random blind level, or "history" for the blinds and stacks of a real
     final-table hand from the user's hand histories, with Hero in any seat that fits the settings.
-    model: see mbr.fgs.MODELS; "hrc" (as HoldemResources Calculator: FGS, at most three players all-in)
-    always has overcalls, and its history spots come from the library solved in advance (mbr.library).
+    model: see mbr.fgs.MODELS; the history spots of "hrc" (as HoldemResources Calculator: FGS) come from
+    the library solved in advance (mbr.library), with or without overcalls.
     forced: history set-ups where a player is all-in from posting are dealt too. He is all-in before
     anybody acts, so Hero calls him (or a caller over him) or folds.
     """
     if model not in MODELS:
         raise ValueError(f"unknown model {model}")
-    overcalls = model in library.LIBRARY_MODELS or str(overcalls).lower() in ("1", "true", "yes", "on")
+    overcalls = str(overcalls).lower() in ("1", "true", "yes", "on")
     forced = str(forced).lower() in ("1", "true", "yes", "on")
     if overcalls and not equity3.available():
         raise ValueError("overcalls need the 3-way equity tables: build/equity3.f32 and equity3_ties.f32 (see README)")
@@ -225,7 +225,7 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
     source = {"stacks": stacks_source}
     from_library = model in library.LIBRARY_MODELS and stacks_source == "history"
     if stacks_source == "history":
-        solved = library.available(model) if from_library else None
+        solved = library.available(model, overcalls) if from_library else None
         snap, (hero_idx, kind) = history_setup(n, hero_options, float(bb_min), float(bb_max), rng, solved, forced)
         level, sb, bb, ante, stacks = snap["level"], snap["sb"], snap["bb"], snap["ante"], list(snap["stacks"])
         source["hand_id"] = snap["hand_id"]
@@ -234,9 +234,9 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
         hero_bb = rng.uniform(float(bb_min), float(bb_max))
         (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
     if from_library:
-        solver = library.load(snap, model)
+        solver = library.load(snap, model, overcalls)
     else:
-        table = build_table(stacks, sb, bb, ante, model)
+        table = build_table(stacks, sb, bb, ante, model, overcalls)
         solver = Solver(table, overcalls=overcalls, forced_open=forced_open(table)).solve()
     # the solver's players are the preflop seats in this order: a player all-in from posting first
     order = preflop_seats(solver.t)

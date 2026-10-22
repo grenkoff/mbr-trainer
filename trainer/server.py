@@ -21,13 +21,16 @@ SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", 
 
 
 def library_counts(forced=False):
-    """{model: {players: history set-ups solved in advance}} for the models served from the library,
-    without (or, if forced, only) those where a player is all-in from posting."""
+    """{model or model-nooc: {players: history set-ups solved in advance}} for the models served from the
+    library, with and without overcalls (mbr.library.variant), without (or, if forced, only) those where a
+    player is all-in from posting."""
     out = {}
     for model in library.LIBRARY_MODELS:
-        solved = library.available(model)
-        out[model] = {n: sum(s["hand_id"] in solved and s["forced"] == forced for s in snaps)
-                      for n, snaps in sorted(real_stacks.snapshots().items())}
+        for overcalls in (True, False):
+            solved = library.available(model, overcalls)
+            out[library.variant(model, overcalls)] = {
+                n: sum(s["hand_id"] in solved and s["forced"] == forced for s in snaps)
+                for n, snaps in sorted(real_stacks.snapshots().items())}
     return out
 
 

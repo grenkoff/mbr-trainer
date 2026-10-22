@@ -33,7 +33,7 @@ function save(key, value) {
 
 // player counts the trainer offers for now: the HRC model is solved player count by player count
 const ENABLED_PLAYERS = [3, 4];
-// models served from the library solved in advance (mbr.library); they always have overcalls
+// models served from the library solved in advance (mbr.library), with and without overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
   { players: [3], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "hrc", overcalls: true, stacks: "history", forced: false,
@@ -58,6 +58,8 @@ let libraryCounts = {}; // model -> players -> of those, solved in advance
 let historyForced = {}, libraryForced = {};
 
 const fromLibrary = () => LIBRARY_MODELS.includes(settings.model);
+// the library of the model with the current overcalls setting (mbr.library.variant)
+const libraryKey = () => settings.overcalls ? settings.model : `${settings.model}-nooc`;
 const withForced = () => settings.forced && settings.stacks === "history";
 function addCounts(a, b) {
   const out = { ...a };
@@ -66,7 +68,7 @@ function addCounts(a, b) {
 }
 /** players -> history hands a spot can come from with the current model (and the all-in setting) */
 function usableHistory() {
-  const usable = (lib, all) => fromLibrary() ? (lib[settings.model] || {}) : all;
+  const usable = (lib, all) => fromLibrary() ? (lib[libraryKey()] || {}) : all;
   return settings.forced
     ? addCounts(usable(libraryCounts, historyCounts), usable(libraryForced, historyForced))
     : usable(libraryCounts, historyCounts);
@@ -130,7 +132,6 @@ function kindAllowed(kind) {
 
 function updateAvailability() {
   if (!overcallsAvailable) settings.overcalls = false;
-  if (fromLibrary() && overcallsAvailable) settings.overcalls = true;
   const anyHistory = settings.players.some((n) => usableHistory()[n]);
   if (!anyHistory) settings.stacks = "random";
   $("setStacks").querySelector('[data-v="history"]').disabled = !anyHistory;
@@ -218,7 +219,7 @@ function refreshSettingsUI() {
         (fromLibrary() ? " Каждый спот считается заново, это до минуты." : "");
   const forcedHands = settings.players.reduce((sum, n) => sum + (historyForced[n] || 0), 0);
   const forcedSolved = settings.players.reduce((sum, n) =>
-    sum + ((fromLibrary() ? (libraryForced[settings.model] || {}) : historyForced)[n] || 0), 0);
+    sum + ((fromLibrary() ? (libraryForced[libraryKey()] || {}) : historyForced)[n] || 0), 0);
   $("setForced").checked = settings.forced;
   $("setForced").disabled = settings.stacks !== "history";
   $("forcedToggle").classList.toggle("disabled", settings.stacks !== "history");
@@ -228,16 +229,15 @@ function refreshSettingsUI() {
       ` на ${who}` + (fromLibrary() ? `, решено заранее ${forcedSolved}.` : ".") +
       (settings.forced ? " Они идут вперемешку с остальными." : "");
   $("modelHint").textContent = settings.model === "hrc"
-    ? "Как HoldemResources Calculator: пуш/фолд, до трёх игроков в олл-ине, модель FGS глубины 1 " +
+    ? "Как HoldemResources Calculator: пуш/фолд, модель FGS глубины 1 " +
       "(исход раздачи оценивается по следующей раздаче, потом ICM), баунти 0,945 BI, " +
       "карты сфолдивших не учитываются."
     : "";
   $("setOvercalls").checked = settings.overcalls;
-  $("setOvercalls").disabled = !overcallsAvailable || fromLibrary();
-  $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable || fromLibrary());
+  $("setOvercalls").disabled = !overcallsAvailable;
+  $("overcallsToggle").classList.toggle("disabled", !overcallsAvailable);
   $("overcallsHint").textContent = !overcallsAvailable
     ? "Нет таблицы эквити на троих (build/equity3.f32), см. README."
-    : fromLibrary() ? "В этой модели всегда до трёх игроков в олл-ине."
     : settings.overcalls
       ? "После пуша и колла игроки сзади могут оверколлить, до трёх игроков в олл-ине."
       : "Пуш получает максимум один колл.";

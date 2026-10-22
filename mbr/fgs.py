@@ -108,9 +108,10 @@ def action_order(stacks, sb, bb, ante):
     return order, [posted[k] for k in order], bool(forced)
 
 
-def table_for(stacks, sb, bb, ante, model):
+def table_for(stacks, sb, bb, ante, model, overcalls=True):
     """The table of a model: stacks before posting in preflop order (first to act ... big blind). A player
-    all-in from posting is put first (see action_order); the table's names are the positions."""
+    all-in from posting is put first (see action_order); the table's names are the positions. overcalls:
+    whether FGS solves the next hand with them."""
     spec = dict(MODELS[model])
     arranged = action_order(stacks, sb, bb, ante)
     if arranged is None:
@@ -119,7 +120,8 @@ def table_for(stacks, sb, bb, ante, model):
     names = [positions(len(stacks))[k] for k in order]
     stacks = [stacks[k] for k in order]
     if spec.pop("fgs", False):
-        return FgsTable(names=names, stacks=stacks, posted=posted, bb=bb, sb=sb, ante=ante, **spec)
+        return FgsTable(names=names, stacks=stacks, posted=posted, bb=bb, sb=sb, ante=ante, overcalls=overcalls,
+                        **spec)
     return Table(names=names, stacks=stacks, posted=posted, bb=bb, **spec)
 
 
