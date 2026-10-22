@@ -79,8 +79,12 @@
     </label>
     <p class="hint" id="overcallsHint"></p>
 
+    <label class="toggle">
+      <input type="checkbox" id="setCovers"> Показывать, кто кого покрывает
+    </label>
+
     <div class="hotkeys">
-      <div><kbd>F</kbd> фолд</div><div><kbd>A</kbd> пуш</div><div><kbd>Space</kbd> следующая</div>
+      <div><kbd>F</kbd> фолд</div><div><kbd>A</kbd> или правый клик по столу — пуш</div><div><kbd>Space</kbd> следующая</div>
     </div>
   </aside>
 
@@ -88,7 +92,6 @@
     <div class="table-wrap">
       <div class="felt" id="felt">
         <div class="pot" id="pot"></div>
-        <div class="level" id="levelInfo"></div>
       </div>
       <div class="loading hidden" id="loading"><div>Солвер считает…<small id="loadingHint"></small></div></div>
     </div>

@@ -36,7 +36,8 @@ const ENABLED_PLAYERS = [3, 4];
 // models served from the library solved in advance (mbr.library); they always have overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
-  { players: [3], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "hrc", overcalls: true, stacks: "history", forced: false },
+  { players: [3], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "hrc", overcalls: true, stacks: "history", forced: false,
+    covers: true, units: "bb" },
   load(SETTINGS_KEY, {}),
 );
 if (!Array.isArray(settings.players)) settings.players = [+settings.players || 3]; // saved before multi-select
@@ -169,6 +170,13 @@ function setupSettings() {
   refreshers.push(bindSeg("setKind2", () => settings.kind, (v) => { settings.kind = v; }));
   $("setOvercalls").addEventListener("change", (e) => { settings.overcalls = e.target.checked; onSettingsChanged(); });
   $("setForced").addEventListener("change", (e) => { settings.forced = e.target.checked; onSettingsChanged(); });
+  // display only: the spot stays
+  $("setCovers").addEventListener("change", (e) => {
+    settings.covers = e.target.checked;
+    save(SETTINGS_KEY, settings);
+    if (current) renderTable(current);
+  });
+  $("setCovers").checked = settings.covers;
   refreshers.push(bindSeg("setStacks", () => settings.stacks, (v) => { settings.stacks = v; }));
   refreshers.push(bindSeg("setDifficulty0", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setDifficulty", () => settings.difficulty, (v) => { settings.difficulty = v; }));
@@ -300,6 +308,10 @@ async function nextSpot() {
 /* ---------------- table rendering ---------------- */
 
 function fmtBB(x) { return (Math.round(x * 10) / 10).toString(); }
+/** An amount of chips on the table, in big blinds or in chips as set by clicking a stack. */
+function fmtAmount(chips, bb) {
+  return settings.units === "chips" ? Math.round(chips).toLocaleString("ru-RU") : `${fmtBB(chips / bb)} bb`;
+}
 
 function cardHTML(card) {
   const r = card[0], s = card[1];
@@ -323,27 +335,26 @@ function renderTable(spot) {
   felt.querySelectorAll(".seat, .chips, .dealer").forEach((el) => el.remove());
   const n = spot.seats.length;
   const bb = spot.bb;
-  const anteBB = spot.ante / bb;
-  let pot = 0;
+  let pot = 0; // in chips
 
   spot.seats.forEach((seat, i) => {
     const rel = (i - spot.hero + n) % n;
     const p = seatPoint(rel, n, 1.08);
     const act = spot.actions.find((a) => a.seat === i) || null;
-    pot += Math.min(anteBB, seat.stack_bb); // a player all-in from posting may have less than the ante
+    pot += Math.min(spot.ante, seat.stack); // a player all-in from posting may have less than the ante
     const el = document.createElement("div");
     el.className = "seat" + (seat.hero ? " hero" : "") + (act && act.action === "fold" ? " folded" : "");
     el.style.left = `${p.x}%`;
     el.style.top = `${p.y}%`;
     let tag = "";
-    if (!seat.hero) {
+    if (!seat.hero && settings.covers) {
       tag = seat.hero_covers
         ? `<span class="tag cover" title="Вы покрываете — баунти ваш при нокауте">покрываете</span>`
         : `<span class="tag covered" title="Этот игрок покрывает вас">покрывает вас</span>`;
     }
     // push/fold has no flat calls: a caller is all-in too, over the shover if he covers him
     const allin = act && act.action !== "fold";
-    const stack = !allin ? `<div class="stack">${fmtBB(seat.stack_bb)} bb</div>`
+    const stack = !allin ? `<div class="stack" title="Клик: bb / фишки">${fmtAmount(seat.stack, bb)}</div>`
       : act.forced ? `<div class="stack allin" title="Олл-ин с постинга анте и блайндов">АВТО ALL-IN</div>`
       : `<div class="stack allin">ALL-IN</div>`;
     el.innerHTML =
@@ -360,9 +371,9 @@ function renderTable(spot) {
 
     // the chips in front of the player: his blind, or his whole stack but the ante if he is all-in
     let chips = 0;
-    if (seat.position === "SB") chips = spot.sb / bb;
-    if (seat.position === "BB") chips = 1;
-    if (allin) chips = Math.max(0, seat.stack_bb - anteBB);
+    if (seat.position === "SB") chips = spot.sb;
+    if (seat.position === "BB") chips = spot.bb;
+    if (allin) chips = Math.max(0, seat.stack - spot.ante);
     pot += chips;
     if (chips > 0) {
       const c = seatPoint(rel, n, rel === 0 ? 0.45 : 0.62);
@@ -370,7 +381,7 @@ function renderTable(spot) {
       ch.className = "chips" + (allin ? " allin" : "");
       ch.style.left = `${c.x}%`;
       ch.style.top = `${c.y}%`;
-      ch.innerHTML = `${CHIP_STACK}<span>${fmtBB(chips)} bb</span>`;
+      ch.innerHTML = `${CHIP_STACK}<span>${fmtAmount(chips, bb)}</span>`;
       felt.appendChild(ch);
     }
     if (seat.position === "BTN") {
@@ -383,10 +394,7 @@ function renderTable(spot) {
       felt.appendChild(de);
     }
   });
-  $("pot").textContent = `Банк ${fmtBB(pot)} bb`;
-  $("levelInfo").textContent = `Уровень ${spot.level}: ${spot.sb}/${spot.bb}, анте ${spot.ante}` +
-    (spot.settings.overcalls ? " · с оверколлами" : "") +
-    (spot.source && spot.source.hand_id ? ` · раздача #${spot.source.hand_id}` : "");
+  $("pot").textContent = `Банк ${fmtAmount(pot, bb)}`;
 }
 
 // the table shows what happened; the buttons are always fold and shove (calling an all-in is a shove too)
@@ -564,6 +572,18 @@ $("btnReset").addEventListener("click", () => {
 $("btnFold").addEventListener("click", () => answer("fold"));
 $("btnPlay").addEventListener("click", () => answer("play"));
 $("btnNext").addEventListener("click", () => nextSpot());
+// a right click on the table shoves
+$("felt").addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  answer("play");
+});
+// a click on a stack, a bet or the pot shows the amounts in chips instead of big blinds, and back
+$("felt").addEventListener("click", (e) => {
+  if (!current || !(e.target instanceof Element) || !e.target.closest(".stack, .chips, .pot")) return;
+  settings.units = settings.units === "chips" ? "bb" : "chips";
+  save(SETTINGS_KEY, settings);
+  renderTable(current);
+});
 $("gridMode").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;

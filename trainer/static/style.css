@@ -81,7 +81,6 @@ kbd {
   background: rgba(0,0,0,.35); padding: 4px 12px; border-radius: 999px; font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.level { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); color: rgba(255,255,255,.55); font-size: 12px; }
 .seat {
   position: absolute; transform: translate(-50%, -50%); width: 118px; text-align: center;
   background: #12161b; border: 1px solid var(--line); border-radius: 10px; padding: 6px 6px 7px;
@@ -91,6 +90,7 @@ kbd {
 .seat.folded { opacity: .45; }
 .seat .pos { font-weight: 700; font-size: 13px; }
 .seat .stack { font-variant-numeric: tabular-nums; color: var(--text); }
+.seat .stack:not(.allin), .chips, .pot { cursor: pointer; }
 .seat .stack.allin { color: var(--bad); font-weight: 800; letter-spacing: .03em; }
 .seat .tag {
   display: inline-block; margin-top: 3px; font-size: 10px; padding: 1px 6px; border-radius: 8px;
