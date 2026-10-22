@@ -91,6 +91,7 @@ kbd {
 .seat.folded { opacity: .45; }
 .seat .pos { font-weight: 700; font-size: 13px; }
 .seat .stack { font-variant-numeric: tabular-nums; color: var(--text); }
+.seat .stack.allin { color: var(--bad); font-weight: 800; letter-spacing: .03em; }
 .seat .tag {
   display: inline-block; margin-top: 3px; font-size: 10px; padding: 1px 6px; border-radius: 8px;
   text-transform: uppercase; letter-spacing: .04em;
@@ -99,14 +100,14 @@ kbd {
 .tag.covered { background: rgba(229,83,75,.14); color: #f08a84; }
 .seat .act { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 12px; font-weight: 700; }
 .act.fold { color: var(--muted); }
-.act.allin { background: var(--bad); color: #fff; padding: 2px 8px; border-radius: 6px; }
-.act.call { background: var(--call); color: #fff; padding: 2px 8px; border-radius: 6px; }
 .chips {
   position: absolute; transform: translate(-50%, -50%); font-size: 11px; font-weight: 600;
-  background: rgba(0,0,0,.45); padding: 1px 7px; border-radius: 999px; white-space: nowrap;
+  display: flex; align-items: center; gap: 3px; white-space: nowrap; font-variant-numeric: tabular-nums;
+  background: rgba(0,0,0,.45); padding: 1px 7px 1px 3px; border-radius: 999px;
 }
-.chips.allin { background: var(--bad); }
-.chips.call { background: var(--call); }
+.chips.allin { font-size: 12.5px; font-weight: 700; }
+.chip-icon { width: 16px; height: 16px; flex: none; }
+.chips.allin .chip-icon { width: 20px; height: 20px; }
 .dealer {
   position: absolute; transform: translate(-50%, -50%); width: 22px; height: 22px; border-radius: 50%;
   background: #f4f4f4; color: #111; font-weight: 800; font-size: 11px; display: grid; place-items: center;

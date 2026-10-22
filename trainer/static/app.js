@@ -311,6 +311,13 @@ function seatPoint(rel, n, radius) {
   return { x: 50 + radius * 50 * Math.cos(angle), y: 50 + radius * 50 * Math.sin(angle) };
 }
 
+// a small stack of chips drawn in front of a bet, as poker clients do
+const CHIP_STACK = `<svg class="chip-icon" viewBox="0 0 18 18" aria-hidden="true">${[13, 9.5, 6].map((y, k) =>
+  `<rect x="2" y="${y - 1.6}" width="14" height="3.2" fill="${k === 1 ? "#1f5fbf" : "#b8322b"}"/>` +
+  `<ellipse cx="9" cy="${y + 1.6}" rx="7" ry="2.6" fill="${k === 1 ? "#1f5fbf" : "#b8322b"}" stroke="#0b0b0b" stroke-width=".6"/>` +
+  `<ellipse cx="9" cy="${y - 1.6}" rx="7" ry="2.6" fill="${k === 1 ? "#2f74dc" : "#d6453c"}" stroke="#0b0b0b" stroke-width=".6"/>` +
+  `<ellipse cx="9" cy="${y - 1.6}" rx="4.3" ry="1.5" fill="none" stroke="#fff" stroke-width=".9" stroke-dasharray="1.6 1.4"/>`).join("")}</svg>`;
+
 function renderTable(spot) {
   const felt = $("felt");
   felt.querySelectorAll(".seat, .chips, .dealer").forEach((el) => el.remove());
@@ -334,37 +341,36 @@ function renderTable(spot) {
         ? `<span class="tag cover" title="Вы покрываете — баунти ваш при нокауте">покрываете</span>`
         : `<span class="tag covered" title="Этот игрок покрывает вас">покрывает вас</span>`;
     }
+    // push/fold has no flat calls: a caller is all-in too, over the shover if he covers him
+    const allin = act && act.action !== "fold";
+    const stack = !allin ? `<div class="stack">${fmtBB(seat.stack_bb)} bb</div>`
+      : act.forced ? `<div class="stack allin" title="Олл-ин с постинга анте и блайндов">АВТО ALL-IN</div>`
+      : `<div class="stack allin">ALL-IN</div>`;
     el.innerHTML =
       (seat.hero ? `<div class="hero-cards">${spot.cards.map(cardHTML).join("")}</div>` : "") +
-      `<div class="pos">${seat.position}${seat.hero ? " · вы" : ""}</div>` +
-      `<div class="stack">${fmtBB(seat.stack_bb)} bb</div>` + tag;
-    if (act) {
+      `<div class="pos">${seat.position}${seat.hero ? " · вы" : ""}</div>` + stack + tag;
+    if (act && act.action === "fold") {
       const a = document.createElement("div");
-      a.className = `act ${act.action}`;
-      // push/fold has no flat calls: a caller who covers the shover is all-in over him
-      a.textContent = { fold: "фолд", allin: act.forced ? "АВТО ALL-IN" : "ALL-IN", call: act.allin ? "КОЛЛ ALL-IN" : "ALL-IN" }[act.action];
-      if (act.forced) a.title = "Олл-ин с постинга анте и блайндов";
+      a.className = "act fold";
+      a.textContent = "фолд";
       a.style[p.y < 50 ? "bottom" : "top"] = "-20px";
       el.appendChild(a);
     }
     felt.appendChild(el);
 
-    // posted blinds / shove chips
-    let chips = 0, cls = "chips";
+    // the chips in front of the player: his blind, or his whole stack but the ante if he is all-in
+    let chips = 0;
     if (seat.position === "SB") chips = spot.sb / bb;
     if (seat.position === "BB") chips = 1;
-    if (act && (act.action === "allin" || (act.action === "call" && !act.allin))) {
-      chips = seat.stack_bb - anteBB; cls += " allin";
-    }
-    else if (act && act.action === "call") { chips = act.amount_bb - anteBB; cls += " call"; }
-    else pot += chips;
+    if (allin) chips = Math.max(0, seat.stack_bb - anteBB);
+    pot += chips;
     if (chips > 0) {
       const c = seatPoint(rel, n, rel === 0 ? 0.45 : 0.62);
       const ch = document.createElement("div");
-      ch.className = cls;
+      ch.className = "chips" + (allin ? " allin" : "");
       ch.style.left = `${c.x}%`;
       ch.style.top = `${c.y}%`;
-      ch.textContent = `${fmtBB(chips)} bb`;
+      ch.innerHTML = `${CHIP_STACK}<span>${fmtBB(chips)} bb</span>`;
       felt.appendChild(ch);
     }
     if (seat.position === "BTN") {
