@@ -16,15 +16,17 @@ from mbr import equity3, library, real_stacks
 from trainer.pool import SpotPool
 
 STATIC = Path(__file__).resolve().parent / "static"
-SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls", "stacks"}
+SPOT_PARAMS = {"players", "position", "kind", "bb_min", "bb_max", "difficulty", "model", "overcalls", "stacks",
+               "forced"}
 
 
-def library_counts():
-    """{model: {players: history set-ups solved in advance}} for the models served from the library."""
+def library_counts(forced=False):
+    """{model: {players: history set-ups solved in advance}} for the models served from the library,
+    without (or, if forced, only) those where a player is all-in from posting."""
     out = {}
     for model in library.LIBRARY_MODELS:
         solved = library.available(model)
-        out[model] = {n: sum(s["hand_id"] in solved for s in snaps)
+        out[model] = {n: sum(s["hand_id"] in solved and s["forced"] == forced for s in snaps)
                       for n, snaps in sorted(real_stacks.snapshots().items())}
     return out
 
@@ -48,7 +50,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if url.path == "/api/info":
             self._json(200, {"overcalls": equity3.available(), "history": real_stacks.counts(),
-                             "library": library_counts(), "pool": self.pool.status()})
+                             "history_forced": real_stacks.counts(forced=True), "library": library_counts(),
+                             "library_forced": library_counts(forced=True), "pool": self.pool.status()})
             return
         if url.path == "/api/spot":
             params = {k: v[0] for k, v in parse_qs(url.query).items() if k in SPOT_PARAMS}

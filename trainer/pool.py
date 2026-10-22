@@ -15,12 +15,12 @@ from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-POOL_VERSION = 4  # bump when the solver or the spot format changes: older stock is then ignored
+POOL_VERSION = 5  # bump when the solver or the spot format changes: older stock is then ignored
 POOL_DIR = Path(__file__).resolve().parent.parent / "build" / "spot_pool" / f"v{POOL_VERSION}"
 TARGET = 10  # spots kept ready for each settings in use
 WANTED_FOR = 15 * 60  # seconds after the last request that settings count as in use
 DEFAULTS = {"players": 5, "position": "any", "kind": "any", "bb_min": 5, "bb_max": 20,
-            "difficulty": "medium", "model": "bounty", "overcalls": False, "stacks": "random"}
+            "difficulty": "medium", "model": "bounty", "overcalls": False, "stacks": "random", "forced": False}
 
 
 def normalize(params):
@@ -35,13 +35,15 @@ def normalize(params):
         "model": str(p["model"]),
         "overcalls": str(p["overcalls"]).lower() in ("1", "true", "yes", "on"),
         "stacks": str(p["stacks"]),
+        # set-ups with a player all-in from posting: only history stacks have them
+        "forced": p["stacks"] == "history" and str(p["forced"]).lower() in ("1", "true", "yes", "on"),
     }
 
 
 def key_of(p):
     return (f"{p['players']}p_{p['position']}_{p['kind']}_{p['bb_min']:g}-{p['bb_max']:g}bb_"
             f"{p['difficulty']}_{p['model']}_{'oc' if p['overcalls'] else 'nooc'}"
-            + ("_history" if p["stacks"] == "history" else ""))
+            + ("_history" if p["stacks"] == "history" else "") + ("_forced" if p["forced"] else ""))
 
 
 def _init_worker():

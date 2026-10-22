@@ -15,6 +15,7 @@ def snapshots():
     """{players: [set-up]} for every final-table hand with 3-9 players that fits the push/fold model.
 
     A set-up holds the blind level and the stacks before posting, in preflop order (first to act ... BB).
+    Set-ups where one player is all-in from posting are flagged "forced".
     """
     if not HANDS_DIR.is_dir():
         return {}
@@ -23,13 +24,15 @@ def snapshots():
         for hand in hands:
             if not hand.is_final_stage:
                 continue
-            table = table_from_hand(hand)
+            table = table_from_hand(hand, allow_forced=True)
             if table is None or not 3 <= table.m <= 9:
                 continue
             out[table.m].append({"hand_id": hand.hand_id, "level": hand.level, "sb": hand.sb, "bb": hand.bb,
-                                 "ante": hand.ante, "stacks": list(table.stacks)})
+                                 "ante": hand.ante, "stacks": list(table.stacks),
+                                 "forced": any(p >= s for p, s in zip(table.posted, table.stacks))})
     return dict(out)
 
 
-def counts():
-    return {n: len(s) for n, s in sorted(snapshots().items())}
+def counts(forced=False):
+    """{players: set-ups} without (or, if forced, only) those where a player is all-in from posting."""
+    return {n: sum(s["forced"] == forced for s in snaps) for n, snaps in sorted(snapshots().items())}

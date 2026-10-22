@@ -492,8 +492,12 @@ class Solver:
         return self
 
 
-def table_from_hand(hand, bounty=MEAN_BOUNTY_BI, future_bounty=True):
-    """Build a Table from a parsed final-table hand, or None if it does not fit the model."""
+def table_from_hand(hand, bounty=MEAN_BOUNTY_BI, future_bounty=True, allow_forced=False):
+    """Build a Table from a parsed final-table hand, or None if it does not fit the model.
+
+    A player all-in from posting does not fit, unless allow_forced and he is the only one: his posted
+    chips are then his whole stack (mbr.fgs.table_for has him play first).
+    """
     stacks = hand.stacks
     sb_name = next((a.name for a in hand.actions if a.verb == "sb"), None)
     bb_name = next((a.name for a in hand.actions if a.verb == "bb"), None)
@@ -503,7 +507,7 @@ def table_from_hand(hand, bounty=MEAN_BOUNTY_BI, future_bounty=True):
     for a in hand.actions:
         if a.verb in ("ante", "sb", "bb"):
             posted[a.name] += a.amount
-    if any(posted[n] >= stacks[n] for n in stacks):
+    if sum(posted[n] >= stacks[n] for n in stacks) > (1 if allow_forced else 0):
         return None  # someone is all-in from posting
     seats = sorted(hand.seats)
     start = next((k for k, s in enumerate(seats) if s > hand.button), 0)

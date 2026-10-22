@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mbr.fgs import MODELS, table_for
+from mbr.fgs import MODELS, forced_open, table_for
 from mbr.pushfold import Solver
 
 LIBRARY_DIR = Path(__file__).resolve().parent.parent / "build" / "library"
@@ -22,9 +22,10 @@ def path(model, hand_id):
 
 
 def solve(snap, model):
-    """Solve a set-up from mbr.real_stacks with the model's table (overcalls on: at most three all-in)."""
+    """Solve a set-up from mbr.real_stacks with the model's table (overcalls on: at most three all-in).
+    The solver's players are in the table's order: a player all-in from posting first."""
     table = table_for(snap["stacks"], snap["sb"], snap["bb"], snap["ante"], model)
-    return Solver(table, overcalls=True).solve()
+    return Solver(table, overcalls=True, forced_open=forced_open(table)).solve()
 
 
 def save(solver, snap, model):
@@ -57,7 +58,7 @@ def load(snap, model):
     plain = "bounty" if MODELS[model].get("bounty") else "icm"
     table = table_for(snap["stacks"], snap["sb"], snap["bb"], snap["ante"], plain)
     table.bunching = False
-    solver = Solver(table, overcalls=True)
+    solver = Solver(table, overcalls=True, forced_open=forced_open(table))
     solver.ev = {}
     for key_repr, strategy, play, fold in zip(data["keys"], data["strategy"], data["ev_play"], data["ev_fold"]):
         key = ast.literal_eval(str(key_repr))  # tuples like ('call', 0, 2) written by save()

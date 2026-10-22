@@ -58,27 +58,21 @@ class FgsTable(Table):
         """(Table, seats in its action order, whether the first one is all-in from posting) of the next
         hand with these stacks, or None if two players would be all-in from posting."""
         m = self.m
+        # this table's seats in preflop order: a player all-in from posting may have been put first
+        by_seat = [self.names.index(p) for p in positions(m)]
         button = m - 3 if m >= 3 else 0
         # the players left, clockwise from the seat after the button: the next button, SB, BB, ...
-        seats = [x for x in ((button + k) % m for k in range(1, m + 1)) if stacks[x] > 0]
+        seats = [x for x in (by_seat[(button + k) % m] for k in range(1, m + 1)) if stacks[x] > 0]
         n = len(seats)
-        order = seats[3:] + seats[:3] if n >= 3 else seats
-        posted = [self.ante] * n
-        posted[-2] += self.sb
-        posted[-1] += self.bb
-        forced = [k for k, x in enumerate(order) if stacks[x] <= posted[k]]
-        if len(forced) > 1:
+        preflop = seats[3:] + seats[:3] if n >= 3 else seats
+        arranged = action_order([stacks[x] for x in preflop], self.sb, self.bb, self.ante)
+        if arranged is None:
             return None
-        if forced:
-            # he posts everything and is the "shover" every other player can call, in their order
-            (k,) = forced
-            posted[k] = stacks[order[k]]
-            order = [order[k]] + order[:k] + order[k + 1:]
-            posted = [posted[k]] + posted[:k] + posted[k + 1:]
-        table = Table(names=positions(n), stacks=[stacks[x] for x in order], posted=posted, bb=self.bb,
-                      payouts=self.payouts[:n], bounty=self.bounty, future_bounty=self.future_bounty,
-                      bunching=False)
-        return table, order, bool(forced)
+        order, posted, forced = arranged
+        table = Table(names=[positions(n)[k] for k in order], stacks=[stacks[preflop[k]] for k in order],
+                      posted=posted, bb=self.bb, payouts=self.payouts[:n], bounty=self.bounty,
+                      future_bounty=self.future_bounty, bunching=False)
+        return table, [preflop[k] for k in order], forced
 
     def next_hand_values(self, stacks):
         """Each player's value at the start of the next hand (0 for the busted ones), or None."""
@@ -94,13 +88,46 @@ class FgsTable(Table):
         return self._next[stacks]
 
 
-def table_for(stacks, sb, bb, ante, model):
-    """The table of a model: stacks before posting in preflop order (first to act ... big blind)."""
-    spec = dict(MODELS[model])
+def action_order(stacks, sb, bb, ante):
+    """(players in the solver's order, their posted chips in that order, whether the first one is all-in
+    from posting) for stacks before posting in preflop order, or None if two players are all-in from
+    posting. Such a player posts everything and is the "shover" every other player can call, in their
+    order (mbr.pushfold.Solver with forced_open)."""
     n = len(stacks)
     posted = [ante] * n
-    posted[-1] += bb
     posted[-2] += sb
+    posted[-1] += bb
+    forced = [k for k in range(n) if stacks[k] <= posted[k]]
+    if len(forced) > 1:
+        return None
+    order = list(range(n))
+    if forced:
+        (k,) = forced
+        posted[k] = stacks[k]
+        order = [k] + order[:k] + order[k + 1:]
+    return order, [posted[k] for k in order], bool(forced)
+
+
+def table_for(stacks, sb, bb, ante, model):
+    """The table of a model: stacks before posting in preflop order (first to act ... big blind). A player
+    all-in from posting is put first (see action_order); the table's names are the positions."""
+    spec = dict(MODELS[model])
+    arranged = action_order(stacks, sb, bb, ante)
+    if arranged is None:
+        raise ValueError("two players are all-in from posting")
+    order, posted, _ = arranged
+    names = [positions(len(stacks))[k] for k in order]
+    stacks = [stacks[k] for k in order]
     if spec.pop("fgs", False):
-        return FgsTable(names=positions(n), stacks=list(stacks), posted=posted, bb=bb, sb=sb, ante=ante, **spec)
-    return Table(names=positions(n), stacks=list(stacks), posted=posted, bb=bb, **spec)
+        return FgsTable(names=names, stacks=stacks, posted=posted, bb=bb, sb=sb, ante=ante, **spec)
+    return Table(names=names, stacks=stacks, posted=posted, bb=bb, **spec)
+
+
+def forced_open(table):
+    """Whether the table's first player is all-in from posting (table_for put him first)."""
+    return table.posted[0] >= table.stacks[0]
+
+
+def preflop_seats(table):
+    """For each player of a table from table_for, his seat in preflop order."""
+    return [positions(table.m).index(p) for p in table.names]

@@ -21,6 +21,7 @@ def main():
     ap.add_argument("--model", default="bounty", choices=["hrc", "bounty", "bounty-now", "icm"])
     ap.add_argument("--overcalls", action="store_true")
     ap.add_argument("--stacks", default="random", choices=["random", "history"])
+    ap.add_argument("--forced", action="store_true", help="history set-ups with a player all-in from posting too")
     ap.add_argument("--count", type=int, default=100, help="spots to have in stock for each difficulty")
     ap.add_argument("--workers", type=int, default=None)
     args = ap.parse_args()
@@ -31,7 +32,8 @@ def main():
     for d in difficulties:
         params = {"players": args.players, "position": args.position, "kind": args.kind,
                   "bb_min": args.bb_min, "bb_max": args.bb_max, "difficulty": d, "model": args.model,
-                  "overcalls": args.overcalls, "stacks": args.stacks}
+                  "overcalls": args.overcalls, "stacks": args.stacks,
+                  "forced": args.forced}
         keys.append(pool.want(params, target=args.count))
     start = time.monotonic()
     try:

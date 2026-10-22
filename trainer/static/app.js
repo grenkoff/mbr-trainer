@@ -36,7 +36,7 @@ const ENABLED_PLAYERS = [3, 4];
 // models served from the library solved in advance (mbr.library); they always have overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
-  { players: [3], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "hrc", overcalls: true, stacks: "history" },
+  { players: [3], position: "any", kind: "any", bbMin: 5, bbMax: 15, difficulty: "natural", model: "hrc", overcalls: true, stacks: "history", forced: false },
   load(SETTINGS_KEY, {}),
 );
 if (!Array.isArray(settings.players)) settings.players = [+settings.players || 3]; // saved before multi-select
@@ -53,11 +53,22 @@ let spotSeq = 0;      // id of the latest nextSpot() call
 let overcallsAvailable = true;
 let historyCounts = {}; // players -> final-table hands in the user's hand histories
 let libraryCounts = {}; // model -> players -> of those, solved in advance
+// the same for the hands where a player is all-in from posting (dealt only if settings.forced)
+let historyForced = {}, libraryForced = {};
 
 const fromLibrary = () => LIBRARY_MODELS.includes(settings.model);
-/** players -> history hands a spot can come from with the current model */
+const withForced = () => settings.forced && settings.stacks === "history";
+function addCounts(a, b) {
+  const out = { ...a };
+  for (const [n, c] of Object.entries(b)) out[n] = (out[n] || 0) + c;
+  return out;
+}
+/** players -> history hands a spot can come from with the current model (and the all-in setting) */
 function usableHistory() {
-  return fromLibrary() ? (libraryCounts[settings.model] || {}) : historyCounts;
+  const usable = (lib, all) => fromLibrary() ? (lib[settings.model] || {}) : all;
+  return settings.forced
+    ? addCounts(usable(libraryCounts, historyCounts), usable(libraryForced, historyForced))
+    : usable(libraryCounts, historyCounts);
 }
 
 /* ---------------- settings UI ---------------- */
@@ -79,9 +90,10 @@ function fits(n, kind) {
   const pos = positionsFor(n);
   const idx = pos.indexOf(settings.position);
   if (settings.position !== "any" && idx === -1) return false;
+  // a player all-in from posting has shoved before anybody acts: even the first to act can call him
   if (kind === "open") return idx !== n - 1;
-  if (kind === "call") return idx !== 0;
-  if (kind === "overcall") return settings.overcalls && (idx === -1 || idx >= 2);
+  if (kind === "call") return idx !== 0 || withForced();
+  if (kind === "overcall") return settings.overcalls && (idx === -1 || idx >= (withForced() ? 1 : 2));
   return true;
 }
 
@@ -156,6 +168,7 @@ function setupSettings() {
   refreshers.push(bindSeg("setKind", () => settings.kind, (v) => { settings.kind = v; }));
   refreshers.push(bindSeg("setKind2", () => settings.kind, (v) => { settings.kind = v; }));
   $("setOvercalls").addEventListener("change", (e) => { settings.overcalls = e.target.checked; onSettingsChanged(); });
+  $("setForced").addEventListener("change", (e) => { settings.forced = e.target.checked; onSettingsChanged(); });
   refreshers.push(bindSeg("setStacks", () => settings.stacks, (v) => { settings.stacks = v; }));
   refreshers.push(bindSeg("setDifficulty0", () => settings.difficulty, (v) => { settings.difficulty = v; }));
   refreshers.push(bindSeg("setDifficulty", () => settings.difficulty, (v) => { settings.difficulty = v; }));
@@ -182,7 +195,8 @@ function refreshSettingsUI() {
   $("bbMax").value = settings.bbMax;
   $("setModel").value = settings.model;
   $("difficultyHint").textContent = DIFFICULTY_HINT[settings.difficulty];
-  const hands = settings.players.reduce((sum, n) => sum + (historyCounts[n] || 0), 0);
+  const allHistory = settings.forced ? addCounts(historyCounts, historyForced) : historyCounts;
+  const hands = settings.players.reduce((sum, n) => sum + (allHistory[n] || 0), 0);
   const solved = settings.players.reduce((sum, n) => sum + (usableHistory()[n] || 0), 0);
   const who = `${playersText()} ${plural(maxPlayers(), "игрока", "игроков", "игроков")}`;
   $("stacksHint").textContent = !Object.keys(historyCounts).length
@@ -194,6 +208,17 @@ function refreshSettingsUI() {
       : (hands ? `Случайный уровень и стеки. В истории ${handsWord(hands)} на ${who}.`
         : `Случайный уровень и стеки. В истории нет раздач на ${who}.`) +
         (fromLibrary() ? " Каждый спот считается заново, это до минуты." : "");
+  const forcedHands = settings.players.reduce((sum, n) => sum + (historyForced[n] || 0), 0);
+  const forcedSolved = settings.players.reduce((sum, n) =>
+    sum + ((fromLibrary() ? (libraryForced[settings.model] || {}) : historyForced)[n] || 0), 0);
+  $("setForced").checked = settings.forced;
+  $("setForced").disabled = settings.stacks !== "history";
+  $("forcedToggle").classList.toggle("disabled", settings.stacks !== "history");
+  $("forcedHint").textContent = settings.stacks !== "history"
+    ? "Только для стеков из истории."
+    : `Игрок олл-ин уже с анте и блайндов, остальные коллируют его или фолдят. В истории ${handsWord(forcedHands)}` +
+      ` на ${who}` + (fromLibrary() ? `, решено заранее ${forcedSolved}.` : ".") +
+      (settings.forced ? " Они идут вперемешку с остальными." : "");
   $("modelHint").textContent = settings.model === "hrc"
     ? "Как HoldemResources Calculator: пуш/фолд, до трёх игроков в олл-ине, модель FGS глубины 1 " +
       "(исход раздачи оценивается по следующей раздаче, потом ICM), баунти 0,945 BI, " +
@@ -228,7 +253,7 @@ function spotParams() {
   return new URLSearchParams({
     players, position: settings.position, kind: settings.kind,
     bb_min: settings.bbMin, bb_max: settings.bbMax, difficulty: diff, model: settings.model,
-    overcalls: settings.overcalls ? 1 : 0, stacks: settings.stacks,
+    overcalls: settings.overcalls ? 1 : 0, stacks: settings.stacks, forced: withForced() ? 1 : 0,
   });
 }
 
@@ -292,12 +317,13 @@ function renderTable(spot) {
   const n = spot.seats.length;
   const bb = spot.bb;
   const anteBB = spot.ante / bb;
-  let pot = anteBB * n;
+  let pot = 0;
 
   spot.seats.forEach((seat, i) => {
     const rel = (i - spot.hero + n) % n;
     const p = seatPoint(rel, n, 1.08);
-    const act = i < spot.hero ? spot.actions[i] : null;
+    const act = spot.actions.find((a) => a.seat === i) || null;
+    pot += Math.min(anteBB, seat.stack_bb); // a player all-in from posting may have less than the ante
     const el = document.createElement("div");
     el.className = "seat" + (seat.hero ? " hero" : "") + (act && act.action === "fold" ? " folded" : "");
     el.style.left = `${p.x}%`;
@@ -316,7 +342,8 @@ function renderTable(spot) {
       const a = document.createElement("div");
       a.className = `act ${act.action}`;
       // push/fold has no flat calls: a caller who covers the shover is all-in over him
-      a.textContent = { fold: "фолд", allin: "ALL-IN", call: act.allin ? "КОЛЛ ALL-IN" : "ALL-IN" }[act.action];
+      a.textContent = { fold: "фолд", allin: act.forced ? "АВТО ALL-IN" : "ALL-IN", call: act.allin ? "КОЛЛ ALL-IN" : "ALL-IN" }[act.action];
+      if (act.forced) a.title = "Олл-ин с постинга анте и блайндов";
       a.style[p.y < 50 ? "bottom" : "top"] = "-20px";
       el.appendChild(a);
     }
@@ -553,6 +580,8 @@ async function init() {
     overcallsAvailable = !!info.overcalls;
     historyCounts = info.history || {};
     libraryCounts = info.library || {};
+    historyForced = info.history_forced || {};
+    libraryForced = info.library_forced || {};
   } catch (e) {
     overcallsAvailable = false;
   }

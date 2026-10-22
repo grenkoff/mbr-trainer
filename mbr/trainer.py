@@ -5,7 +5,7 @@ import random
 import numpy as np
 
 from mbr import equity3, library, real_stacks
-from mbr.fgs import MODELS, table_for
+from mbr.fgs import MODELS, action_order, forced_open, preflop_seats, table_for
 from mbr.pushfold import Solver
 from mbr.ranges import class_combos, class_label, combo_counts
 
@@ -85,17 +85,20 @@ LINE_ATTEMPTS = 3
 
 
 def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, difficulty="medium",
-              model="bounty", overcalls=False, stacks="random", seed=None):
+              model="bounty", overcalls=False, stacks="random", forced=False, seed=None):
     """Generate spots until one has a hand of the requested difficulty.
 
     stacks: "random" stacks at a random blind level, or "history" for the blinds and stacks of a real
     final-table hand from the user's hand histories, with Hero in any seat that fits the settings.
     model: see mbr.fgs.MODELS; "hrc" (as HoldemResources Calculator: FGS, at most three players all-in)
     always has overcalls, and its history spots come from the library solved in advance (mbr.library).
+    forced: history set-ups where a player is all-in from posting are dealt too. He is all-in before
+    anybody acts, so Hero calls him (or a caller over him) or folds.
     """
     if model not in MODELS:
         raise ValueError(f"unknown model {model}")
     overcalls = model in library.LIBRARY_MODELS or str(overcalls).lower() in ("1", "true", "yes", "on")
+    forced = str(forced).lower() in ("1", "true", "yes", "on")
     if overcalls and not equity3.available():
         raise ValueError("overcalls need the 3-way equity tables: build/equity3.f32 and equity3_ties.f32 (see README)")
     if kind == "overcall" and not overcalls:
@@ -111,7 +114,7 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
     rng = random.Random(seed)
     for attempt in range(MAX_ATTEMPTS):
         spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, stacks,
-                          strict=attempt < MAX_ATTEMPTS - 1)
+                          forced, strict=attempt < MAX_ATTEMPTS - 1)
         if spot:
             return spot
 
@@ -167,14 +170,26 @@ def _pick_decision(solver, hero_idx, kind, difficulty, rng, strict):
     return None
 
 
-def history_setup(n, hero_options, bb_min, bb_max, rng, solved=None):
+def fits(kind, seat, order, forced):
+    """Whether Hero in preflop seat `seat` can face `kind`; `order` holds the seats in the solver's order.
+    With a player all-in from posting (forced, first in `order`) Hero can only call him, or overcall him
+    and a caller."""
+    if not forced:
+        return _kind_fits(kind, seat, len(order))
+    k = order.index(seat)
+    return {"open": False, "call": k > 0, "overcall": k > 1}[kind]
+
+
+def history_setup(n, hero_options, bb_min, bb_max, rng, solved=None, forced=False):
     """A real final-table set-up with n players where Hero can sit in a seat that fits the settings
-    (among the hand ids in `solved`, if given)."""
+    (among the hand ids in `solved`, if given; with those where a player is all-in from posting if forced)."""
     fitting = []
     for snap in real_stacks.snapshots().get(n, []):
-        if solved is not None and snap["hand_id"] not in solved:
+        if solved is not None and snap["hand_id"] not in solved or snap["forced"] and not forced:
             continue
-        options = [(i, k) for i, k in hero_options if bb_min <= snap["stacks"][i] / snap["bb"] <= bb_max]
+        order = action_order(snap["stacks"], snap["sb"], snap["bb"], snap["ante"])[0]
+        options = [(i, k) for i, k in hero_options if bb_min <= snap["stacks"][i] / snap["bb"] <= bb_max
+                   and fits(k, i, order, snap["forced"])]
         if options:
             fitting.append((snap, options))
     if not fitting:
@@ -186,44 +201,51 @@ def history_setup(n, hero_options, bb_min, bb_max, rng, solved=None):
 
 
 def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, stacks_source,
-               strict):
+               forced, strict):
     n = int(players)
     pos = positions(n)
     if kind == "any":
         allowed_kinds = ["open", "call"] + (["overcall"] if overcalls else [])
     else:
         allowed_kinds = [kind]
-    hero_options = [(i, k) for i, p in enumerate(pos) if position in ("any", p)
-                    for k in allowed_kinds if _kind_fits(k, i, n)]
-    if not hero_options:
+    # Hero's seats and decisions; whether one can come up depends on the set-up (see fits())
+    hero_options = [(i, k) for i, p in enumerate(pos) if position in ("any", p) for k in allowed_kinds]
+    if not any(_kind_fits(k, i, n) for i, k in hero_options) and not (forced and stacks_source == "history"):
         raise ValueError(f"position {position} cannot face '{kind}' with {n} players")
     source = {"stacks": stacks_source}
     from_library = model in library.LIBRARY_MODELS and stacks_source == "history"
     if stacks_source == "history":
         solved = library.available(model) if from_library else None
-        snap, (hero_idx, kind) = history_setup(n, hero_options, float(bb_min), float(bb_max), rng, solved)
+        snap, (hero_idx, kind) = history_setup(n, hero_options, float(bb_min), float(bb_max), rng, solved, forced)
         level, sb, bb, ante, stacks = snap["level"], snap["sb"], snap["bb"], snap["ante"], list(snap["stacks"])
         source["hand_id"] = snap["hand_id"]
     else:
-        hero_idx, kind = rng.choice(hero_options)
+        hero_idx, kind = rng.choice([(i, k) for i, k in hero_options if _kind_fits(k, i, n)])
         hero_bb = rng.uniform(float(bb_min), float(bb_max))
         (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
     if from_library:
         solver = library.load(snap, model)
     else:
-        solver = Solver(build_table(stacks, sb, bb, ante, model), overcalls=overcalls).solve()
+        table = build_table(stacks, sb, bb, ante, model)
+        solver = Solver(table, overcalls=overcalls, forced_open=forced_open(table)).solve()
+    # the solver's players are the preflop seats in this order: a player all-in from posting first
+    order = preflop_seats(solver.t)
+    is_forced = forced_open(solver.t)
 
     # a solved table has more spots: other players in the stack range and other lines before them
     others = [(i, k) for i, k in hero_options
-              if (i, k) != (hero_idx, kind) and float(bb_min) <= stacks[i] / bb <= float(bb_max)]
+              if (i, k) != (hero_idx, kind) and float(bb_min) <= stacks[i] / bb <= float(bb_max)
+              and fits(k, i, order, is_forced)]
     rng.shuffle(others)
     for hero_idx, kind in [(hero_idx, kind)] + others:
-        found = _pick_decision(solver, hero_idx, kind, difficulty, rng, strict)
+        found = _pick_decision(solver, order.index(hero_idx), kind, difficulty, rng, strict)
         if found:
             break
     else:
         return None
     shover, caller, ev_play, ev_fold, ev_diff, freq, cls = found
+    acted = order[:order.index(hero_idx)]  # the seats that act before Hero
+    shover, caller = (None if x is None else order[x] for x in (shover, caller))
 
     seats = []
     for i, p in enumerate(pos):
@@ -235,18 +257,20 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
             "hero_covers": stacks[hero_idx] >= stacks[i] and i != hero_idx,
         })
     actions = []
-    for i in range(hero_idx):
+    for i in acted:
         if i == shover:
-            actions.append({"position": pos[i], "action": "allin", "amount_bb": seats[i]["stack_bb"]})
+            actions.append({"seat": i, "position": pos[i], "action": "allin", "amount_bb": seats[i]["stack_bb"],
+                            "forced": is_forced})
         elif i == caller:
             amount = min(stacks[i], stacks[shover])
-            actions.append({"position": pos[i], "action": "call", "amount_bb": round(amount / bb, 1),
+            actions.append({"seat": i, "position": pos[i], "action": "call", "amount_bb": round(amount / bb, 1),
                             "allin": amount == stacks[i]})
         else:
-            actions.append({"position": pos[i], "action": "fold"})
+            actions.append({"seat": i, "position": pos[i], "action": "fold"})
     return {
         "settings": {"players": n, "position": position, "kind": kind, "bb_min": bb_min, "bb_max": bb_max,
-                     "difficulty": difficulty, "model": model, "overcalls": overcalls, "stacks": stacks_source},
+                     "difficulty": difficulty, "model": model, "overcalls": overcalls, "stacks": stacks_source,
+                     "forced": forced},
         "source": source,
         "level": level, "sb": sb, "bb": bb, "ante": ante,
         "seats": seats,

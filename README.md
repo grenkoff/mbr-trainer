@@ -31,6 +31,8 @@ Settings:
 - Hero stack range in bb;
 - stacks: random, or the blinds and stacks of real final-table hands from `hh/hands/`, with Hero in any
   seat whose position and stack fit the settings;
+- with history stacks, the hands where a player is all-in from posting his ante and blinds ("auto all-in",
+  off by default). He has shoved before anybody acts, so the others call him or fold, the first to act too;
 - difficulty:
   - as at the table: every one of the 1326 combos dealt with equal probability;
   - or by the cost of a mistake: easy more than 0.10 BI;
@@ -88,7 +90,8 @@ model "hrc"). What HRC does was gathered from its release notes and its develope
   and each player's value at its start is what the outcome is worth. As in HRC, outcomes where the pot
   is split are valued with ICM;
 - a player left with no more than his antes and blinds is all-in from posting in that next hand: he
-  always plays, and the others call him or fold;
+  always plays, and the others call him or fold. Hands from the history where that happens are solved the
+  same way (with two such players they are left out);
 - mystery bounties as HRC's KO bounties of 0.945 BI. Future bounties are split by chips, and the
   winner does not get his own bounty: 8 bounties for 9 players. In HRC that means a first prize of
   4 − 0.945 BI with KO bounties of 0.945 BI.
