@@ -354,7 +354,10 @@ function renderTable(spot) {
     }
     // push/fold has no flat calls: a caller is all-in too, over the shover if he covers him
     const allin = act && act.action !== "fold";
-    const stack = !allin ? `<div class="stack" title="Клик: bb / фишки">${fmtAmount(seat.stack, bb)}</div>`
+    // as poker clients show it: what is left behind the ante and the blind
+    const blind = seat.position === "SB" ? spot.sb : seat.position === "BB" ? spot.bb : 0;
+    const behind = Math.max(0, seat.stack - spot.ante - blind);
+    const stack = !allin ? `<div class="stack" title="Клик: bb / фишки">${fmtAmount(behind, bb)}</div>`
       : act.forced ? `<div class="stack allin" title="Олл-ин с постинга анте и блайндов">АВТО ALL-IN</div>`
       : `<div class="stack allin">ALL-IN</div>`;
     el.innerHTML =
