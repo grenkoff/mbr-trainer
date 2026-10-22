@@ -170,14 +170,23 @@ def _pick_decision(solver, hero_idx, kind, difficulty, rng, strict):
     return None
 
 
-def fits(kind, seat, order, forced):
+def fits(kind, seat, order, forced, covered=()):
     """Whether Hero in preflop seat `seat` can face `kind`; `order` holds the seats in the solver's order.
     With a player all-in from posting (forced, first in `order`) Hero can only call him, or overcall him
-    and a caller."""
+    and a caller; and not call him from a seat in `covered`, where there is nothing to decide."""
     if not forced:
         return _kind_fits(kind, seat, len(order))
     k = order.index(seat)
-    return {"open": False, "call": k > 0, "overcall": k > 1}[kind]
+    return {"open": False, "call": k > 0 and seat not in covered, "overcall": k > 1}[kind]
+
+
+def covered_seats(stacks, sb, bb, ante, order):
+    """The seats whose ante and blind already match the player all-in from posting (first in `order`):
+    if everybody before them folds, they just see the showdown."""
+    posted = [ante] * len(stacks)
+    posted[-2] += sb
+    posted[-1] += bb
+    return {i for i in range(len(stacks)) if i != order[0] and posted[i] >= stacks[order[0]]}
 
 
 def history_setup(n, hero_options, bb_min, bb_max, rng, solved=None, forced=False):
@@ -189,7 +198,8 @@ def history_setup(n, hero_options, bb_min, bb_max, rng, solved=None, forced=Fals
             continue
         order = action_order(snap["stacks"], snap["sb"], snap["bb"], snap["ante"])[0]
         options = [(i, k) for i, k in hero_options if bb_min <= snap["stacks"][i] / snap["bb"] <= bb_max
-                   and fits(k, i, order, snap["forced"])]
+                   and fits(k, i, order, snap["forced"], covered_seats(snap["stacks"], snap["sb"], snap["bb"],
+                                                                       snap["ante"], order))]
         if options:
             fitting.append((snap, options))
     if not fitting:
@@ -235,7 +245,7 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
     # a solved table has more spots: other players in the stack range and other lines before them
     others = [(i, k) for i, k in hero_options
               if (i, k) != (hero_idx, kind) and float(bb_min) <= stacks[i] / bb <= float(bb_max)
-              and fits(k, i, order, is_forced)]
+              and fits(k, i, order, is_forced, covered_seats(stacks, sb, bb, ante, order))]
     rng.shuffle(others)
     for hero_idx, kind in [(hero_idx, kind)] + others:
         found = _pick_decision(solver, order.index(hero_idx), kind, difficulty, rng, strict)
