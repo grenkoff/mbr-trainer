@@ -12,7 +12,7 @@ HANDS_DIR = Path(__file__).resolve().parent.parent / "hh" / "hands"
 
 @lru_cache(maxsize=1)
 def snapshots():
-    """{players: [set-up]} for every final-table hand with 3-9 players that fits the push/fold model.
+    """{players: [set-up]} for every final-table hand with 2-9 players that fits the push/fold model.
 
     A set-up holds the blind level and the stacks before posting, in preflop order (first to act ... BB).
     Set-ups where one player is all-in from posting are flagged "forced".
@@ -25,7 +25,7 @@ def snapshots():
             if not hand.is_final_stage:
                 continue
             table = table_from_hand(hand, allow_forced=True)
-            if table is None or not 3 <= table.m <= 9:
+            if table is None or not 2 <= table.m <= 9:
                 continue
             out[table.m].append({"hand_id": hand.hand_id, "level": hand.level, "sb": hand.sb, "bb": hand.bb,
                                  "ante": hand.ante, "stacks": list(table.stacks),
