@@ -15,6 +15,8 @@ const PLAYERS_NAME = Object.fromEntries([3, 4, 5, 6, 7, 8, 9].map((n) => [n, `${
 const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша", overcall: "Оверколл" };
 const CLOSE_EV = 0.005; // decisions this close in EV count as correct either way
 const STATS_KEY = "mbr-trainer-stats-v1";
+const RATING_START = 1500;
+const RATING_PROVISIONAL = 30; // rated answers with the bigger K, while the rating is still finding its level
 const SETTINGS_KEY = "mbr-trainer-settings-v1";
 
 const $ = (id) => document.getElementById(id);
@@ -405,6 +407,31 @@ function renderQuestion() {
   $("question").innerHTML = "";
 }
 
+/* ---------------- rating ---------------- */
+
+// Elo as on chess sites, every spot being an opponent: the closer push and fold are in EV, the stronger the spot.
+// A mistake costs the EV gap, so a big mistake (an easy spot) loses a lot and a right answer there gains little.
+function spotRating(gap) {
+  return Math.min(2600, Math.max(400, 1500 - 700 * Math.log10(gap / 0.03))); // 0.3 BI → 800, 0.03 → 1500, 0.003 → 2200
+}
+
+function ratingChange(rating, games, gap, won) {
+  const k = games < RATING_PROVISIONAL ? 40 : 20;
+  const expected = 1 / (1 + 10 ** ((spotRating(gap) - rating) / 400));
+  return k * ((won ? 1 : 0) - expected);
+}
+
+const ratedRows = (rows) => rows.filter((r) => r.rating != null);
+function currentRating() {
+  const rated = ratedRows(stats);
+  return rated.length ? rated[rated.length - 1].rating : RATING_START;
+}
+
+function fmtDelta(x) {
+  const r = Math.round(x);
+  return r > 0 ? `+${r}` : r < 0 ? `−${-r}` : "±0";
+}
+
 /* ---------------- answering ---------------- */
 
 function showSpot(spot, ans) {
@@ -425,13 +452,17 @@ function answer(choice) {
   const d = a.ev_diff[a.hand_class];
   const best = d > 0 ? "play" : "fold";
   const cost = choice === best ? 0 : Math.abs(d);
-  const correct = choice === best || Math.abs(d) < CLOSE_EV;
-  answered = { choice, correct, cost };
+  const gap = Math.abs(d);
+  const correct = choice === best || gap < CLOSE_EV;
+  // decisions too close to call do not move the rating either way
+  const before = currentRating();
+  const delta = gap < CLOSE_EV ? 0 : ratingChange(before, ratedRows(stats).length, gap, choice === best);
+  answered = { choice, correct, cost, delta };
   const record = {
     ts: Date.now(), kind: current.kind, players: current.seats.length,
     position: current.seats[current.hero].position, difficulty: current.settings.difficulty,
     model: current.settings.model, overcalls: !!current.settings.overcalls, stacks: current.settings.stacks || "random",
-    hand: current.hand, correct, cost,
+    hand: current.hand, correct, cost, gap, rating: before + delta,
   };
   stats.push(record);
   if (stats.length > 5000) stats = stats.slice(-5000);
@@ -449,13 +480,13 @@ function renderResult() {
   const v = $("verdict");
   if (ans.choice === (d > 0 ? "play" : "fold")) {
     v.className = "verdict good";
-    v.innerHTML = `Верно<small>${spot.hand}: ${d > 0 ? playWord : "фолд"}</small>`;
+    v.innerHTML = `Верно<small>${spot.hand}: ${d > 0 ? playWord : "фолд"}${ratingNote(ans)}</small>`;
   } else if (ans.correct) {
     v.className = "verdict close";
-    v.innerHTML = `Почти без разницы<small>Разница ${Math.abs(d).toFixed(3)} BI</small>`;
+    v.innerHTML = `Почти без разницы<small>Разница ${Math.abs(d).toFixed(3)} BI${ratingNote(ans)}</small>`;
   } else {
     v.className = "verdict bad";
-    v.innerHTML = `Ошибка — лучше ${d > 0 ? playWord : "фолд"}<small>Потеря ${ans.cost.toFixed(3)} BI</small>`;
+    v.innerHTML = `Ошибка — лучше ${d > 0 ? playWord : "фолд"}<small>Потеря ${ans.cost.toFixed(3)} BI${ratingNote(ans)}</small>`;
   }
   const sign = (x) => (x >= 0 ? "+" : "") + x.toFixed(3);
   $("evTable").innerHTML = `
@@ -473,6 +504,8 @@ function renderResult() {
   renderGrid();
   $("result").classList.remove("hidden");
 }
+
+const ratingNote = (ans) => (ans.delta == null ? "" : ` · рейтинг ${fmtDelta(ans.delta)}`);
 
 function classLabel(i) {
   const row = Math.floor(i / 13), col = i % 13;
@@ -520,8 +553,11 @@ function summarize(rows) {
 
 function renderStats() {
   const all = summarize(stats);
+  const rated = ratedRows(stats);
+  const rating = Math.round(currentRating());
+  const provisional = rated.length < RATING_PROVISIONAL ? "?" : "";
   $("statsInline").innerHTML = all.n
-    ? `Раздач <b>${all.n}</b> · верно <b>${all.pct.toFixed(0)}%</b> · потеря <b>${all.loss.toFixed(2)} BI</b>`
+    ? `Рейтинг <b>${rating}${provisional}</b> · раздач <b>${all.n}</b> · верно <b>${all.pct.toFixed(0)}%</b> · потеря <b>${all.loss.toFixed(2)} BI</b>`
     : "Статистика появится после первой раздачи";
   const row = (label, s) =>
     `<div class="stat-row"><span>${label}</span><span>${s.n ? `${s.pct.toFixed(0)}% · ${s.n}` : "—"}</span></div>`;
@@ -533,7 +569,14 @@ function renderStats() {
       rows.map(([label, s]) => row(label, s)).join("") + `</div>`;
   };
   const sess = summarize(history);
+  const sessDelta = history.reduce((s, h) => s + (h.delta || 0), 0);
+  const peak = rated.length >= RATING_PROVISIONAL
+    ? Math.round(Math.max(...rated.slice(RATING_PROVISIONAL - 1).map((r) => r.rating))) : null;
   $("statsBox").innerHTML = `
+    <div class="stat-row rating"><span>Рейтинг</span><span>${rating}${provisional}</span></div>
+    ${ratingChart(rated.slice(-300).map((r) => r.rating))}
+    <div class="stat-row"><span>За сессию</span><span>${history.length ? fmtDelta(sessDelta) : "—"}</span></div>
+    <div class="stat-row"><span>Лучший</span><span>${peak ?? "—"}</span></div>
     <div class="stat-row"><span>Эта сессия</span><span>${sess.n ? `${sess.pct.toFixed(0)}% · ${sess.n}` : "—"}</span></div>
     <div class="stat-row"><span>Всего раздач</span><span>${all.n}</span></div>
     <div class="stat-row"><span>Верно</span><span>${all.pct.toFixed(1)}%</span></div>
@@ -542,6 +585,14 @@ function renderStats() {
     ${group("По типу решения", "kind", KIND_NAME)}
     ${group("По сложности", "difficulty", DIFF_NAME)}
     ${group("По числу игроков", "players", PLAYERS_NAME, true)}`;
+}
+
+// the rating over the last answers, as a line scaled to its own range
+function ratingChart(values) {
+  if (values.length < 2) return "";
+  const lo = Math.min(...values), hi = Math.max(...values), span = Math.max(hi - lo, 1);
+  const pts = values.map((v, i) => `${(100 * i / (values.length - 1)).toFixed(2)},${(38 - 36 * (v - lo) / span).toFixed(2)}`);
+  return `<svg class="rating-chart" viewBox="0 0 100 40" preserveAspectRatio="none"><polyline points="${pts.join(" ")}"/></svg>`;
 }
 
 function renderHistory() {
@@ -553,7 +604,7 @@ function renderHistory() {
       : `vs ${s.seats[s.shover].position}+${s.seats[s.caller].position}`;
     return `<li data-idx="${idx}"><span class="${h.correct ? "ok" : "err"}">${h.correct ? "✔" : "✘"}</span>` +
       `<b>${s.hand}</b><span>${s.seats.length}p ${pos} ${what} ${fmtBB(s.seats[s.hero].stack_bb)}bb</span>` +
-      `<span class="loss">${h.cost ? "−" + h.cost.toFixed(2) : ""}</span></li>`;
+      `<span class="loss">${h.delta == null ? "" : fmtDelta(h.delta)}</span></li>`;
   }).join("");
 }
 
@@ -561,7 +612,7 @@ $("history").addEventListener("click", (e) => {
   const li = e.target.closest("li");
   if (!li) return;
   const h = history[+li.dataset.idx];
-  showSpot(h.spot, { choice: h.choice, correct: h.correct, cost: h.cost });
+  showSpot(h.spot, { choice: h.choice, correct: h.correct, cost: h.cost, delta: h.delta });
 });
 
 $("btnReset").addEventListener("click", () => {

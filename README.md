@@ -56,6 +56,11 @@ them at `--resume-temp` (75 °C): a laptop running all cores flat out for hours 
 
 Hotkeys: `F` fold, `A` shove/call, `Space` next.
 
+Rating: Elo as on chess sites, from 1500, with every spot as the opponent. The closer push and fold are in EV,
+the stronger the spot: 0.3 BI apart is rated 800, 0.03 BI 1500, 0.003 BI 2200. A big mistake (an easy spot)
+therefore loses a lot and a right answer there gains little, while a hard spot gains a lot and costs little.
+K is 40 for the first 30 answers (the rating shows a `?`) and 20 after; decisions within 0.005 BI leave it as is.
+
 Solver processes (CPU cores − 1 by default, `--workers N`) keep about 10 solved spots ready for the
 settings in use, so answers come instantly. The stock is kept in `build/spot_pool/` between runs and
 can be filled in advance, also while the server runs:
