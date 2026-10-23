@@ -61,7 +61,7 @@ def _init_worker():
 def _solve(job):
     snap, model, overcalls = job
     start = time.monotonic()
-    library.save(library.solve(snap, model, overcalls), snap, model)
+    library.save(library.solve(snap, model, overcalls), snap, model, overcalls)
     return snap["hand_id"], len(snap["stacks"]), time.monotonic() - start
 
 

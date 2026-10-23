@@ -34,8 +34,9 @@ def solve(snap, model, overcalls=True):
     return Solver(table, overcalls=overcalls, forced_open=forced_open(table)).solve()
 
 
-def save(solver, snap, model):
-    p = path(model, snap["hand_id"], solver.overcalls)
+def save(solver, snap, model, overcalls=True):
+    # not solver.overcalls: heads-up has no overcalls, but goes in both variants
+    p = path(model, snap["hand_id"], overcalls)
     p.parent.mkdir(parents=True, exist_ok=True)
     keys = list(solver.ev)
     tmp = p.with_suffix(".part.npz")
