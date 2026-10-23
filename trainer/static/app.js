@@ -421,11 +421,28 @@ function ratingChange(rating, games, gap, won) {
   return k * ((won ? 1 : 0) - expected);
 }
 
-const ratedRows = (rows) => rows.filter((r) => r.rating != null);
-function currentRating() {
-  const rated = ratedRows(stats);
+// a separate rating for every number of players, as chess sites keep one per time control
+const ratedRows = (rows, players) => rows.filter((r) => r.rating != null && r.players === players);
+function currentRating(players) {
+  const rated = ratedRows(stats, players);
   return rated.length ? rated[rated.length - 1].rating : RATING_START;
 }
+// replay every answer whose EV gap is known, so the ratings always follow the formula above
+function rerate() {
+  const now = {}, games = {};
+  for (const r of stats) {
+    if (r.gap == null) continue;
+    const before = now[r.players] ?? RATING_START, n = games[r.players] ?? 0;
+    r.rating = before + (r.gap < CLOSE_EV ? 0 : ratingChange(before, n, r.gap, r.correct));
+    now[r.players] = r.rating;
+    games[r.players] = n + 1;
+  }
+}
+
+// the rating on show: that of the spot on the table
+const shownPlayers = () => (current ? current.seats.length : settings.players[0]);
+const fmtRating = (players) =>
+  `${Math.round(currentRating(players))}${ratedRows(stats, players).length < RATING_PROVISIONAL ? "?" : ""}`;
 
 function fmtDelta(x) {
   const r = Math.round(x);
@@ -444,6 +461,7 @@ function showSpot(spot, ans) {
   $("btnFold").disabled = $("btnPlay").disabled = !!ans;
   $("btnNext").classList.toggle("hidden", !ans);
   if (ans) renderResult(); else $("result").classList.add("hidden");
+  renderStats(); // the rating on show follows the spot's player count
 }
 
 function answer(choice) {
@@ -455,11 +473,12 @@ function answer(choice) {
   const gap = Math.abs(d);
   const correct = choice === best || gap < CLOSE_EV;
   // decisions too close to call do not move the rating either way
-  const before = currentRating();
-  const delta = gap < CLOSE_EV ? 0 : ratingChange(before, ratedRows(stats).length, gap, choice === best);
+  const players = current.seats.length;
+  const before = currentRating(players);
+  const delta = gap < CLOSE_EV ? 0 : ratingChange(before, ratedRows(stats, players).length, gap, choice === best);
   answered = { choice, correct, cost, delta };
   const record = {
-    ts: Date.now(), kind: current.kind, players: current.seats.length,
+    ts: Date.now(), kind: current.kind, players,
     position: current.seats[current.hero].position, difficulty: current.settings.difficulty,
     model: current.settings.model, overcalls: !!current.settings.overcalls, stacks: current.settings.stacks || "random",
     hand: current.hand, correct, cost, gap, rating: before + delta,
@@ -469,7 +488,6 @@ function answer(choice) {
   save(STATS_KEY, stats);
   history.unshift({ spot: current, ...answered });
   showSpot(current, answered);
-  renderStats();
   renderHistory();
 }
 
@@ -553,11 +571,10 @@ function summarize(rows) {
 
 function renderStats() {
   const all = summarize(stats);
-  const rated = ratedRows(stats);
-  const rating = Math.round(currentRating());
-  const provisional = rated.length < RATING_PROVISIONAL ? "?" : "";
+  const players = shownPlayers();
+  const rated = ratedRows(stats, players);
   $("statsInline").innerHTML = all.n
-    ? `Рейтинг <b>${rating}${provisional}</b> · раздач <b>${all.n}</b> · верно <b>${all.pct.toFixed(0)}%</b> · потеря <b>${all.loss.toFixed(2)} BI</b>`
+    ? `Рейтинг ${players}p <b>${fmtRating(players)}</b> · раздач <b>${all.n}</b> · верно <b>${all.pct.toFixed(0)}%</b> · потеря <b>${all.loss.toFixed(2)} BI</b>`
     : "Статистика появится после первой раздачи";
   const row = (label, s) =>
     `<div class="stat-row"><span>${label}</span><span>${s.n ? `${s.pct.toFixed(0)}% · ${s.n}` : "—"}</span></div>`;
@@ -569,14 +586,16 @@ function renderStats() {
       rows.map(([label, s]) => row(label, s)).join("") + `</div>`;
   };
   const sess = summarize(history);
-  const sessDelta = history.reduce((s, h) => s + (h.delta || 0), 0);
+  const sessHands = history.filter((h) => h.spot.seats.length === players);
+  const sessDelta = sessHands.reduce((s, h) => s + (h.delta || 0), 0);
   const peak = rated.length >= RATING_PROVISIONAL
     ? Math.round(Math.max(...rated.slice(RATING_PROVISIONAL - 1).map((r) => r.rating))) : null;
   $("statsBox").innerHTML = `
-    <div class="stat-row rating"><span>Рейтинг</span><span>${rating}${provisional}</span></div>
+    <div class="stat-row rating"><span>Рейтинг · ${PLAYERS_NAME[players]}</span><span>${fmtRating(players)}</span></div>
     ${ratingChart(rated.slice(-300).map((r) => r.rating))}
-    <div class="stat-row"><span>За сессию</span><span>${history.length ? fmtDelta(sessDelta) : "—"}</span></div>
+    <div class="stat-row"><span>За сессию</span><span>${sessHands.length ? fmtDelta(sessDelta) : "—"}</span></div>
     <div class="stat-row"><span>Лучший</span><span>${peak ?? "—"}</span></div>
+    ${ratingGroup()}
     <div class="stat-row"><span>Эта сессия</span><span>${sess.n ? `${sess.pct.toFixed(0)}% · ${sess.n}` : "—"}</span></div>
     <div class="stat-row"><span>Всего раздач</span><span>${all.n}</span></div>
     <div class="stat-row"><span>Верно</span><span>${all.pct.toFixed(1)}%</span></div>
@@ -585,6 +604,15 @@ function renderStats() {
     ${group("По типу решения", "kind", KIND_NAME)}
     ${group("По сложности", "difficulty", DIFF_NAME)}
     ${group("По числу игроков", "players", PLAYERS_NAME, true)}`;
+}
+
+// every player count rated so far, with its rated answers
+function ratingGroup() {
+  const counts = [...new Set(stats.filter((r) => r.rating != null).map((r) => r.players))].sort((a, b) => a - b);
+  if (!counts.length) return "";
+  return `<div class="stat-group"><div class="title">Рейтинги</div>` + counts.map((n) =>
+    `<div class="stat-row"><span>${PLAYERS_NAME[n]}</span><span>${fmtRating(n)} · ${ratedRows(stats, n).length}</span></div>`,
+  ).join("") + `</div>`;
 }
 
 // the rating over the last answers, as a line scaled to its own range
@@ -666,6 +694,8 @@ async function init() {
     overcallsAvailable = false;
   }
   setupSettings();
+  rerate();
+  save(STATS_KEY, stats);
   renderStats();
   nextSpot();
 }

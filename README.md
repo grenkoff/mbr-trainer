@@ -56,7 +56,8 @@ them at `--resume-temp` (75 °C): a laptop running all cores flat out for hours 
 
 Hotkeys: `F` fold, `A` shove/call, `Space` next.
 
-Rating: Elo as on chess sites, from 1500, with every spot as the opponent. The closer push and fold are in EV,
+Rating: Elo as on chess sites, one for every number of players (as chess sites keep one per time control),
+from 1500, with every spot as the opponent. The panel shows the one of the spot on the table. The closer push and fold are in EV,
 the stronger the spot: 0.3 BI apart is rated 800, 0.03 BI 1500, 0.003 BI 2200. A big mistake (an easy spot)
 therefore loses a lot and a right answer there gains little, while a hard spot gains a lot and costs little.
 K is 40 for the first 30 answers (the rating shows a `?`) and 20 after; decisions within 0.005 BI leave it as is.
