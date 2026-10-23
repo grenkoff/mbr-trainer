@@ -103,8 +103,8 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
         raise ValueError("overcalls need the 3-way equity tables: build/equity3.f32 and equity3_ties.f32 (see README)")
     if kind == "overcall" and not overcalls:
         raise ValueError("overcall spots need overcalls enabled")
-    if not 3 <= int(players) <= len(POSITIONS):
-        raise ValueError(f"players must be 3..{len(POSITIONS)}")
+    if not 2 <= int(players) <= len(POSITIONS):
+        raise ValueError(f"players must be 2..{len(POSITIONS)}")
     if difficulty not in DIFFICULTIES:
         raise ValueError(f"unknown difficulty {difficulty}")
     if stacks not in ("random", "history"):
@@ -231,7 +231,7 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
         source["hand_id"] = snap["hand_id"]
     else:
         hero_idx, kind = rng.choice([(i, k) for i, k in hero_options if _kind_fits(k, i, n)])
-        hero_bb = rng.uniform(float(bb_min), float(bb_max))
+        hero_bb = rng.uniform(max(float(bb_min), MIN_STACK_BB), float(bb_max))  # random stacks are never shorter
         (level, sb, bb, ante), stacks = random_stacks(n, hero_idx, hero_bb, rng)
     if from_library:
         solver = library.load(snap, model, overcalls)

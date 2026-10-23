@@ -11,7 +11,7 @@ const DIFFICULTY_HINT = {
   mix: "Случайная сложность для каждой раздачи.",
 };
 const DIFF_NAME = { natural: "Как в игре", easy: "Легко", medium: "Средне", hard: "Сложно" };
-const PLAYERS_NAME = Object.fromEntries([3, 4, 5, 6, 7, 8, 9].map((n) => [n, `${n} ${n < 5 ? "игрока" : "игроков"}`]));
+const PLAYERS_NAME = Object.fromEntries([2, 3, 4, 5, 6, 7, 8, 9].map((n) => [n, `${n} ${n < 5 ? "игрока" : "игроков"}`]));
 const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша", overcall: "Оверколл" };
 const CLOSE_EV = 0.005; // decisions this close in EV count as correct either way
 const STATS_KEY = "mbr-trainer-stats-v1";
@@ -34,7 +34,7 @@ function save(key, value) {
 }
 
 // player counts the trainer offers for now: the HRC model is solved player count by player count
-const ENABLED_PLAYERS = [3, 4];
+const ENABLED_PLAYERS = [2, 3, 4];
 // models served from the library solved in advance (mbr.library), with and without overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
@@ -98,7 +98,7 @@ function fits(n, kind) {
   // a player all-in from posting has shoved before anybody acts: even the first to act can call him
   if (kind === "open") return idx !== n - 1;
   if (kind === "call") return idx !== 0 || withForced();
-  if (kind === "overcall") return settings.overcalls && (idx === -1 || idx >= (withForced() ? 1 : 2));
+  if (kind === "overcall") return settings.overcalls && n >= 3 && (idx === -1 || idx >= (withForced() ? 1 : 2));
   return true;
 }
 
@@ -149,7 +149,7 @@ function setupSettings() {
       b.title = "Пока недоступно";
     }
   }
-  $("playersHint").textContent = "Пока доступны 3 и 4 игрока: остальные откроются позже.";
+  $("playersHint").textContent = "Пока доступны 2, 3 и 4 игрока: остальные откроются позже.";
   renderPositionButtons();
   // several player counts can be on at once; each spot gets one of them at random
   $("setPlayers").addEventListener("click", (e) => {
@@ -389,7 +389,7 @@ function renderTable(spot) {
       ch.innerHTML = `${CHIP_STACK}<span>${fmtAmount(chips, bb)}</span>`;
       felt.appendChild(ch);
     }
-    if (seat.position === "BTN") {
+    if (seat.position === (n === 2 ? "SB" : "BTN")) { // heads-up the small blind has the button
       // beside the seat box on the side facing the middle of the table, clear of the action labels
       const de = document.createElement("div");
       de.className = "dealer";
