@@ -34,7 +34,7 @@ function save(key, value) {
 }
 
 // player counts the trainer offers for now: the HRC model is solved player count by player count
-const ENABLED_PLAYERS = [2, 3, 4];
+const ENABLED_PLAYERS = [2, 3, 4, 5];
 // models served from the library solved in advance (mbr.library), with and without overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
@@ -149,7 +149,7 @@ function setupSettings() {
       b.title = "Пока недоступно";
     }
   }
-  $("playersHint").textContent = "Пока доступны 2, 3 и 4 игрока: остальные откроются позже.";
+  $("playersHint").textContent = "Пока доступны 2–5 игроков: остальные откроются позже.";
   renderPositionButtons();
   // several player counts can be on at once; each spot gets one of them at random
   $("setPlayers").addEventListener("click", (e) => {

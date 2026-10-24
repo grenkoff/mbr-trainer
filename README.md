@@ -25,7 +25,7 @@ The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unle
 ```
 
 Settings:
-- number of players (for now 2, 3 and 4: the HRC model is solved player count by player count);
+- number of players (for now 2 to 5: the HRC model is solved player count by player count);
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
@@ -44,8 +44,8 @@ The HRC model serves history spots from a library solved in advance (`build/libr
 takes about half a minute per 3-player table and one to three minutes per 4-player one:
 
 ```bash
-.venv/bin/python build_library.py --players 2,3,4 --workers 1   # only the set-ups not solved yet: rerun after new hands
-.venv/bin/python build_library.py --players 2,3,4 --workers 1 --no-overcalls   # the same without overcalls
+.venv/bin/python build_library.py --players 2,3,4,5 --workers 1   # only the set-ups not solved yet: rerun after new hands
+.venv/bin/python build_library.py --players 2,3,4,5 --workers 1 --no-overcalls   # the same without overcalls
 ```
 
 With overcalls up to three players are all-in; without them a shove gets one call at most, in the next hand
