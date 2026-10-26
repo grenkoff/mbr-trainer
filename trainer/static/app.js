@@ -34,7 +34,7 @@ function save(key, value) {
 }
 
 // player counts the trainer offers for now: the HRC model is solved player count by player count
-const ENABLED_PLAYERS = [2, 3, 4, 5];
+const ENABLED_PLAYERS = [2, 3, 4, 5, 6, 7, 8, 9];
 // models served from the library solved in advance (mbr.library), with and without overcalls
 const LIBRARY_MODELS = ["hrc"];
 const settings = Object.assign(
@@ -60,8 +60,11 @@ let libraryCounts = {}; // model -> players -> of those, solved in advance
 let historyForced = {}, libraryForced = {};
 
 const fromLibrary = () => LIBRARY_MODELS.includes(settings.model);
-// the library of the model with the current overcalls setting (mbr.library.variant)
-const libraryKey = () => settings.overcalls ? settings.model : `${settings.model}-nooc`;
+// Overcalls for n players: as set, but a library model has them only where its library was solved with them
+// (2-5 players so far; 6-9 are solved without, where they would take days per player count)
+const overcallsFor = (n) => settings.overcalls && (!fromLibrary() || !!(libraryCounts[settings.model] || {})[n]);
+// the library of the model for n players (mbr.library.variant)
+const libraryKeyFor = (n) => overcallsFor(n) ? settings.model : `${settings.model}-nooc`;
 const withForced = () => settings.forced && settings.stacks === "history";
 function addCounts(a, b) {
   const out = { ...a };
@@ -70,10 +73,13 @@ function addCounts(a, b) {
 }
 /** players -> history hands a spot can come from with the current model (and the all-in setting) */
 function usableHistory() {
-  const usable = (lib, all) => fromLibrary() ? (lib[libraryKey()] || {}) : all;
-  return settings.forced
-    ? addCounts(usable(libraryCounts, historyCounts), usable(libraryForced, historyForced))
-    : usable(libraryCounts, historyCounts);
+  const out = {};
+  for (const n of ENABLED_PLAYERS) out[n] = usableCount(libraryCounts, historyCounts, n) +
+    (settings.forced ? usableCount(libraryForced, historyForced, n) : 0);
+  return out;
+}
+function usableCount(lib, all, n) {
+  return (fromLibrary() ? (lib[libraryKeyFor(n)] || {}) : all)[n] || 0;
 }
 
 /* ---------------- settings UI ---------------- */
@@ -98,7 +104,7 @@ function fits(n, kind) {
   // a player all-in from posting has shoved before anybody acts: even the first to act can call him
   if (kind === "open") return idx !== n - 1;
   if (kind === "call") return idx !== 0 || withForced();
-  if (kind === "overcall") return settings.overcalls && n >= 3 && (idx === -1 || idx >= (withForced() ? 1 : 2));
+  if (kind === "overcall") return overcallsFor(n) && n >= 3 && (idx === -1 || idx >= (withForced() ? 1 : 2));
   return true;
 }
 
@@ -149,7 +155,6 @@ function setupSettings() {
       b.title = "Пока недоступно";
     }
   }
-  $("playersHint").textContent = "Пока доступны 2–5 игроков: остальные откроются позже.";
   renderPositionButtons();
   // several player counts can be on at once; each spot gets one of them at random
   $("setPlayers").addEventListener("click", (e) => {
@@ -220,8 +225,7 @@ function refreshSettingsUI() {
         : `Случайный уровень и стеки. В истории нет раздач на ${who}.`) +
         (fromLibrary() ? " Каждый спот считается заново, это до минуты." : "");
   const forcedHands = settings.players.reduce((sum, n) => sum + (historyForced[n] || 0), 0);
-  const forcedSolved = settings.players.reduce((sum, n) =>
-    sum + ((fromLibrary() ? (libraryForced[libraryKey()] || {}) : historyForced)[n] || 0), 0);
+  const forcedSolved = settings.players.reduce((sum, n) => sum + usableCount(libraryForced, historyForced, n), 0);
   $("setForced").checked = settings.forced;
   $("setForced").disabled = settings.stacks !== "history";
   $("forcedToggle").classList.toggle("disabled", settings.stacks !== "history");
@@ -241,8 +245,17 @@ function refreshSettingsUI() {
   $("overcallsHint").textContent = !overcallsAvailable
     ? "Нет таблицы эквити на троих (build/equity3.f32), см. README."
     : settings.overcalls
-      ? "После пуша и колла игроки сзади могут оверколлить, до трёх игроков в олл-ине."
+      ? "После пуша и колла игроки сзади могут оверколлить, до трёх игроков в олл-ине." + noOvercallsNote()
       : "Пуш получает максимум один колл.";
+}
+
+// the selected player counts that go without overcalls although they are on
+function noOvercallsNote() {
+  const without = settings.players.filter((n) => n >= 3 && !overcallsFor(n)).sort((a, b) => a - b);
+  return without.length
+    ? ` На ${without.join(", ")} ${plural(without[without.length - 1], "игроке", "игроках", "игроках")} — без оверколлов: ` +
+      "их библиотека посчитана только так."
+    : "";
 }
 
 function onSettingsChanged() {
@@ -263,7 +276,7 @@ function spotParams() {
   return new URLSearchParams({
     players, position: settings.position, kind: settings.kind,
     bb_min: settings.bbMin, bb_max: settings.bbMax, difficulty: diff, model: settings.model,
-    overcalls: settings.overcalls ? 1 : 0, stacks: settings.stacks, forced: withForced() ? 1 : 0,
+    overcalls: overcallsFor(players) ? 1 : 0, stacks: settings.stacks, forced: withForced() ? 1 : 0,
   });
 }
 
@@ -284,7 +297,7 @@ function startPrefetch() {
 }
 
 async function nextSpot() {
-  $("loadingHint").textContent = settings.overcalls && maxPlayers() >= 6
+  $("loadingHint").textContent = settings.players.some((n) => n >= 6 && overcallsFor(n))
     ? "С оверколлами на 6–9 игроках первый спот считается до минуты, дальше споты берутся из запаса. " +
       "Запас можно заполнить заранее: python -m trainer.fill"
     : "";

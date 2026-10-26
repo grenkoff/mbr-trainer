@@ -25,7 +25,7 @@ The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unle
 ```
 
 Settings:
-- number of players (for now 2 to 5: the HRC model is solved player count by player count);
+- number of players, 2 to 9;
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
@@ -38,18 +38,20 @@ Settings:
   - or by the cost of a mistake: easy more than 0.10 BI;
     medium 0.03–0.10 BI, hard less than 0.03 BI;
 - valuation model: "as HRC" (the default, see below) or ICM with or without bounties;
-- overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`).
+- overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`). The HRC model has them for 2-5
+  players only: 6-9 players are solved without, so with overcalls on 2-5 players get them and 6-9 do not.
 
 The HRC model serves history spots from a library solved in advance (`build/library/`), since it
 takes about half a minute per 3-player table and one to three minutes per 4-player one:
 
 ```bash
 .venv/bin/python build_library.py --players 2,3,4,5 --workers 1   # only the set-ups not solved yet: rerun after new hands
-.venv/bin/python build_library.py --players 2,3,4,5 --workers 1 --no-overcalls   # the same without overcalls
+.venv/bin/python build_library.py --players 2,3,4,5,6,7,8,9 --workers 1 --no-overcalls   # without overcalls
 ```
 
 With overcalls up to three players are all-in; without them a shove gets one call at most, in the next hand
-of FGS too. Without overcalls a table takes a few seconds.
+of FGS too. Without overcalls a table takes from a few seconds (3-4 players) to three minutes (9 players);
+with them five to six minutes for 5 players, and about three and a half times more for every player beyond.
 
 The build pauses its workers while the CPU package is hotter than `--max-temp` (85 °C by default) and resumes
 them at `--resume-temp` (75 °C): a laptop running all cores flat out for hours can overheat and shut down.
