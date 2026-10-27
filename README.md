@@ -188,7 +188,13 @@ python3 report.py                                      # structure stats and mos
 .venv/bin/python compare.py --model bounty             # score Hero's decisions against the solver
 .venv/bin/python compare.py --model bounty --overcalls --workers 2   # with overcalls (slower, resumable)
 python3 leaks.py build/decisions_bounty_overcalls.csv  # where the EV goes, by situation
+.venv/bin/python ev_report.py                          # Rush chipEV/tour and final-table $EV, all-in adjusted
 ```
+
+`ev_report.py` counts every hand whose betting ended before the river with all the remaining cards shown at
+its expectation over the boards still to come (`csrc/showdown.c`, built on first use), and every knockout at
+the mean bounty. At the final table money is ICM of 4/3/2 BI plus the bounties to come split by chips, so the
+others' all-ins count too: they move Hero's money as well.
 
 ## Equity tables
 

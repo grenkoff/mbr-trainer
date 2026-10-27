@@ -58,6 +58,7 @@ class Hand:
     actions: list = field(default_factory=list)
     collected: dict = field(default_factory=dict)  # name -> chips won
     uncalled: dict = field(default_factory=dict)
+    board: list = field(default_factory=list)  # community cards dealt, e.g. ['Qd', '8d', 'Jc']
 
     @property
     def stacks(self):
@@ -95,6 +96,13 @@ class Hand:
     def final_stacks(self):
         put = self.chips_put_in()
         return {n: s - put[n] + self.collected.get(n, 0) for n, s in self.stacks.items()}
+
+    def shown_cards(self):
+        """Player name -> the two cards shown at showdown (Hero's own cards too)."""
+        out = {a.name: re.findall(r"[2-9TJQKA][cdhs]", a.cards)[:2] for a in self.actions if a.verb == "show"}
+        if self.hero_cards and "Hero" in self.stacks:
+            out["Hero"] = self.hero_cards.split()
+        return {n: c for n, c in out.items() if len(c) == 2}
 
     def positions(self):
         """Map player name -> position label (BTN, SB, BB, UTG, ..., CO)."""
@@ -143,6 +151,8 @@ def parse_hand(block):
             if st == "SUMMARY":
                 break
             street = {"HOLE CARDS": "PRE"}.get(st, st)
+            if st in ("FLOP", "TURN", "RIVER"):
+                hand.board = re.findall(r"[2-9TJQKA][cdhs]", line)
             continue
         if street == "PRE" and (s := SEAT_RE.match(line)) and not hand.actions:
             hand.seats[int(s["seat"])] = (s["name"], _int(s["stack"]))
