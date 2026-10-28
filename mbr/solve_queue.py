@@ -106,7 +106,36 @@ class SolveQueue:
             running = [{"hand_id": h, "variant": v, "seconds": round(time.time() - t)}
                        for (h, v), t in self.running.items()]
         return {"jobs": by_status, "running": running, "paused": self.paused, "temperature": cpu_temperature(),
-                "max_temp": self.max_temp, "resume_temp": self.resume_temp, "last_error": self.last_error}
+                "max_temp": self.max_temp, "resume_temp": self.resume_temp, "last_error": self.last_error,
+                "workers": self.workers, "progress": progress()}
+
+
+RECENT = 20  # the latest solves a variant's time per set-up is averaged over
+
+
+def progress():
+    """For every player count and variant the library needs: [{players, variant, total, done, failed, seconds}],
+    seconds being the wall time per set-up of its latest solves here (pauses for heat included), or None."""
+    from mbr import library
+
+    with db.connect() as conn:
+        setups = {r["players"]: r["n"] for r in
+                  conn.execute("SELECT players, count(*) AS n FROM setups GROUP BY 1")}
+        done = {(r["players"], r["variant"]): r["n"] for r in conn.execute(
+            "SELECT s.players, x.variant, count(*) AS n FROM solutions x JOIN setups s ON s.hand_id = x.hand_id"
+            " GROUP BY 1, 2")}
+        failed = {(r["players"], r["variant"]): r["n"] for r in conn.execute(
+            "SELECT s.players, j.variant, count(*) AS n FROM solve_jobs j JOIN setups s ON s.hand_id = j.hand_id"
+            " WHERE j.status = 'failed' GROUP BY 1, 2")}
+        seconds = {(r["players"], r["variant"]): float(r["seconds"]) for r in conn.execute(
+            "SELECT players, variant, avg(seconds) AS seconds FROM (SELECT s.players, j.variant,"
+            " extract(epoch FROM j.finished_at - j.started_at) AS seconds, row_number() OVER"
+            " (PARTITION BY s.players, j.variant ORDER BY j.finished_at DESC) AS k FROM solve_jobs j"
+            " JOIN setups s ON s.hand_id = j.hand_id WHERE j.status = 'done' AND j.started_at IS NOT NULL) t"
+            " WHERE k <= %s GROUP BY 1, 2", (RECENT,))}
+    return [{"players": n, "variant": v, "total": setups[n], "done": done.get((n, v), 0),
+             "failed": failed.get((n, v), 0), "seconds": seconds.get((n, v))}
+            for n in sorted(setups) for v in library.variants_for(n)]
 
     def shutdown(self):
         self.stop.set()

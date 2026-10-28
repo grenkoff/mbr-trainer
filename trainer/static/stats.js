@@ -36,8 +36,7 @@ async function loadStats() {
 
 function renderStatsPage() {
   const d = statsData, t = d.totals;
-  const left = d.results.left
-    ? `<p class="hint">Считаются результаты: осталось ${d.results.left} турниров${d.results.cooling ? " (пауза: процессор остывает)" : ""}.</p>` : "";
+  const left = d.results.left ? `<section class="panel">${resultsProgress(d.results)}</section>` : "";
   if (!t.tournaments) {
     statsEl("statsPage").innerHTML = filtersHtml() + left + `<section class="panel"><p class="muted">Нет турниров: загрузи историю на вкладке «Загрузка» или измени фильтр.</p></section>`;
     bindFilters();

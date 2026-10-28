@@ -30,21 +30,63 @@ async function uploadFiles(files) {
   if (files.length) refreshUploads();
 }
 
-const PLAYER_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9];
+function fmtDuration(sec) {
+  const m = Math.round(sec / 60);
+  if (m < 1) return "меньше минуты";
+  if (m < 60) return `${m} мин`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h} ч ${m % 60} мин` : `${Math.floor(h / 24)} д ${h % 24} ч`;
+}
+
+/* a progress bar with "done of total" and a note under it; also used by the statistics tab */
+function progressBar(label, done, total, note = "") {
+  const share = total ? Math.min(1, done / total) : 1;
+  // never rounds up to 100% before the end
+  const percent = Math.floor(share * 1000) / 10;
+  return `<div class="progress">
+    <div class="progress-head"><span>${label}</span><b>${fmtInt(done)} из ${fmtInt(total)} · ${percent}%</b></div>
+    <div class="progress-track" role="progressbar" aria-label="${label}" aria-valuemin="0" aria-valuemax="${total}"
+      aria-valuenow="${done}"><div class="progress-fill${share >= 1 ? " full" : ""}" style="width:${share * 100}%"></div></div>
+    ${note ? `<p class="hint">${note}</p>` : ""}</div>`;
+}
 
 function renderQueue(q) {
-  const jobs = q.jobs || {};
-  const sum = (s) => Object.values(jobs[s] || {}).reduce((a, b) => a + b, 0);
   const temp = q.temperature == null ? "" : ` · процессор ${Math.round(q.temperature)}°C`;
-  const state = !sum("queued") && !q.running.length ? `всё посчитано${temp}`
+  const byPlayers = new Map();
+  let done = 0, total = 0, failed = 0, seconds = 0;
+  const unknown = new Set();
+  for (const g of q.progress) {
+    const left = g.total - g.done - g.failed;
+    const p = byPlayers.get(g.players) || { done: 0, total: 0, seconds: 0, unknown: false };
+    p.done += g.done; p.total += g.total;
+    done += g.done; total += g.total; failed += g.failed;
+    if (left > 0 && g.seconds == null) { p.unknown = true; unknown.add(g.players); }
+    else if (left > 0) { p.seconds += left * g.seconds / q.workers; seconds += left * g.seconds / q.workers; }
+    byPlayers.set(g.players, p);
+  }
+  const busy = done + failed < total;
+  const state = !busy ? `всё посчитано${temp}`
     : q.paused ? `<span class="bad">пауза: перегрев, продолжит при ${q.resume_temp}°C</span>${temp}`
     : `<span class="good">считает</span>${temp}`;
-  const rows = PLAYER_COUNTS.filter((n) => ["queued", "running", "done", "failed"].some((s) => (jobs[s] || {})[n]))
-    .map((n) => `<tr><td>${n}</td>${["queued", "running", "done", "failed"].map((s) => `<td>${fmtInt((jobs[s] || {})[n])}</td>`).join("")}</tr>`);
-  uploadEl("queueStatus").innerHTML = `<p>${state}</p>` +
-    (rows.length ? `<div class="table-scroll"><table class="data"><tr><th>Игроков</th><th>В очереди</th><th>Считается</th><th>Готово</th><th>Ошибки</th></tr>${rows.join("")}</table></div>` : "") +
+  const eta = !busy ? "" : unknown.size
+    ? `Осталось не меньше ${fmtDuration(seconds)}: время для ${[...unknown].join(", ")} игроков станет известно после их первых решений.`
+    : `Осталось около ${fmtDuration(seconds)} при нынешней скорости, с паузами на остывание.`;
+  const rows = [...byPlayers].map(([n, p]) => `<tr><td>${n}</td><td>${fmtInt(p.done)}</td><td>${fmtInt(p.total)}</td>
+    <td class="bar-cell"><div class="progress-track small"><div class="progress-fill${p.done >= p.total ? " full" : ""}"
+      style="width:${p.total ? p.done / p.total * 100 : 100}%"></div></div></td>
+    <td>${fmtInt(p.total - p.done)}</td>
+    <td>${p.done >= p.total ? "—" : p.unknown ? "?" : fmtDuration(p.seconds)}</td></tr>`);
+  uploadEl("queueStatus").innerHTML = `<p>${state}</p>` + progressBar("Решено", done, total, eta) +
+    (rows.length ? `<div class="table-scroll"><table class="data"><tr><th>Игроков</th><th>Решено</th><th>Всего</th>
+      <th class="bar-cell"></th><th>Осталось</th><th>Время</th></tr>${rows.join("")}</table></div>` : "") +
     q.running.map((r) => `<p class="hint">Сейчас: ${r.hand_id}, ${r.variant.endsWith("-nooc") ? "без оверколлов" : "с оверколлами"}, ${r.seconds} с</p>`).join("") +
+    (failed ? `<p class="hint bad">С ошибкой: ${fmtInt(failed)}</p>` : "") +
     (q.last_error ? `<p class="hint bad">Последняя ошибка: ${escapeHtml(q.last_error)}</p>` : "");
+}
+
+function resultsProgress(r) {
+  return progressBar("Турниров посчитано", r.total - r.left, r.total,
+    r.left ? (r.cooling ? "Пауза: процессор остывает." : "Считается в фоне, статистика дополняется по ходу.") : "");
 }
 
 async function refreshUploads() {
@@ -56,6 +98,7 @@ async function refreshUploads() {
     <span>Раздач</span><b>${fmtInt(t.hands)}</b><span>Сетапов финального стола</span><b>${fmtInt(t.setups)}</b>
     <span>Период</span><b>${fmtDate(t.first)} — ${fmtDate(t.last)}</b></div>`;
   renderQueue(info.queue);
+  uploadEl("resultsStatus").innerHTML = resultsProgress(info.results);
   uploadEl("uploadsTable").innerHTML = info.uploads.length
     ? `<tr><th>Файл</th><th>Загружен</th><th>Новых раздач</th><th>Сводок</th></tr>` + info.uploads.map((u) =>
       `<tr><td>${escapeHtml(u.name)}</td><td>${fmtDate(u.uploaded_at)}</td><td>${fmtInt(u.hands)}</td><td>${fmtInt(u.summaries)}</td></tr>`).join("")

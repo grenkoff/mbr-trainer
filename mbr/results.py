@@ -281,6 +281,12 @@ def pending():
         return [r["id"] for r in rows]
 
 
+def total():
+    """How many tournaments have hands, so results to compute."""
+    with db.connect() as conn:
+        return conn.execute("SELECT count(DISTINCT tournament_id) AS n FROM hands").fetchone()["n"]
+
+
 def update(tournament_ids, log=None, stop=None):
     """Compute and keep the results of these tournaments, cooling down the CPU between them."""
     summaries = db.load_summaries()
@@ -315,7 +321,7 @@ class Worker:
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.cooling = False
-        self.left = len(pending())
+        self.left, self.total = len(pending()), total()
         threading.Thread(target=self._loop, daemon=True).start()
 
     def notify(self):
@@ -330,7 +336,7 @@ class Worker:
         while not self.stop.is_set():
             try:
                 ids = pending()
-                self.left = len(ids)
+                self.left, self.total = len(ids), total()
                 if not ids:
                     self.wake.wait(10)
                     self.wake.clear()
@@ -342,7 +348,7 @@ class Worker:
                 self.stop.wait(30)
 
     def status(self):
-        return {"left": self.left, "cooling": self.cooling}
+        return {"left": self.left, "total": self.total, "cooling": self.cooling}
 
     def shutdown(self):
         self.stop.set()

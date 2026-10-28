@@ -270,3 +270,17 @@ kbd {
   .felt { margin: 40px 30px 50px; }
   .seat { width: 92px; font-size: 12px; }
 }
+
+/* progress bars */
+.progress { margin: 10px 0 14px; }
+.progress-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.progress-head b { font-variant-numeric: tabular-nums; }
+.progress-track { height: 10px; border-radius: 5px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.progress-track.small { height: 6px; min-width: 80px; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width .4s ease; }
+.progress-fill.full { background: var(--good); }
+.data .bar-cell { width: 30%; }
+@media (max-width: 600px) {
+  .data .bar-cell { display: none; }
+  .data th, .data td { padding: 5px 6px; }
+}
