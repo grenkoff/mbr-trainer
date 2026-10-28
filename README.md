@@ -1,13 +1,14 @@
 # Mystery Battle Royale push/fold tools
 
 Final-table push/fold solver (ICM + mystery bounties), hand-history analysis and a trainer
-for GGPoker / PokerOK Mystery Battle Royale.
+for GGPoker / PokerOK Mystery Battle Royale, in one local web app.
 
 ## Setup
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+docker compose up -d     # PostgreSQL on 127.0.0.1:5433 (MBR_DATABASE_URL to use another one)
 # 3-way all-in tables for overcalls (19 + 58 MB, a couple of minutes on 4 cores)
 mkdir -p build
 gcc -O3 -march=native -fopenmp -o build/equity3 csrc/equity3.c && build/equity3 1000 build/equity3.f32 build/equity3_ties.f32
@@ -18,18 +19,48 @@ gcc -O3 -march=native -fopenmp -o build/equity3 csrc/equity3.c && build/equity3 
 The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unless `MBR_SOLVER=python`;
 `MBR_THREADS=N` sets its threads (default: all cores; the trainer's solver processes use one each).
 
-## Trainer
+## Web app
 
 ```bash
 .venv/bin/python -m trainer          # http://localhost:8765
 ```
+
+Three tabs:
+- **Upload**: GG hand histories and tournament summaries, as .txt files, folders or zip archives. Hands and
+  summaries already in the database are skipped. The new final-table set-ups are solved in the background with
+  the HRC model (2-5 players with overcalls and without, 6-9 without; `--solve-workers`, 1 by default), pausing
+  while the CPU is hotter than 80 °C until it is down to 75 °C. The tab shows the queue.
+- **Statistics**, for a date range and buy-in:
+  - the results per tournament as cumulative graphs: as drawn, with every bounty at its mean, with the final-table
+    all-ins at their expectation, and with the Rush all-ins too (as `ev_report.py` below); Rush chips and chipEV;
+    finishing places;
+  - totals: ROI each way with its standard error, the final table, knockouts and bounties;
+  - preflop stats by stage, position and stack: VPIP, PFR, raise first in, open shove, limp, 3-bet, call of a shove;
+  - Hero's final-table push/fold decisions up to 20 bb effective against the HRC library: mistakes and their cost by
+    decision, position and stack, and the costliest hands.
+
+  The results are computed per tournament in the background (`mbr/results.py`, with the same CPU guard) and kept in
+  the database; new uploads and newly solved set-ups bring their tournaments up to date.
+- **Trainer**, below.
+
+All of it lives in PostgreSQL (`mbr/db.py`): the hands and summaries, the final-table set-ups, the solver library,
+the solve queue, the trainer's spot pool and answers, and the per-tournament results. Files kept before go in once:
+
+```bash
+.venv/bin/python import_history.py hh/hands hh/summaries                    # hand histories, as the upload tab
+.venv/bin/python import_history.py --library build/library --pool build/spot_pool   # old library and spot pool
+```
+
+The trainer's answers kept in the browser before move to the database the first time the trainer tab opens.
+
+### Trainer
 
 Settings:
 - number of players, 2 to 9;
 - position;
 - decision type (open shove, call vs a shove, overcall vs a shove and a call);
 - Hero stack range in bb;
-- stacks: random, or the blinds and stacks of real final-table hands from `hh/hands/`, with Hero in any
+- stacks: random, or the blinds and stacks of real final-table hands uploaded, with Hero in any
   seat whose position and stack fit the settings;
 - with history stacks, the hands where a player is all-in from posting his ante and blinds ("auto all-in",
   off by default). He has shoved before anybody acts, so the others call him or fold, the first to act too;
@@ -41,11 +72,12 @@ Settings:
 - overcalls on/off (needs `build/equity3.f32` and `build/equity3_ties.f32`). The HRC model has them for 2-5
   players only: 6-9 players are solved without, so with overcalls on 2-5 players get them and 6-9 do not.
 
-The HRC model serves history spots from a library solved in advance (`build/library/`), since it
-takes about half a minute per 3-player table and one to three minutes per 4-player one:
+The HRC model serves history spots from a library solved in advance (the solutions table), since it
+takes about half a minute per 3-player table and one to three minutes per 4-player one. The upload tab's queue
+solves new set-ups; `build_library.py` does the same from the command line, with all cores:
 
 ```bash
-.venv/bin/python build_library.py --players 2,3,4,5 --workers 1   # only the set-ups not solved yet: rerun after new hands
+.venv/bin/python build_library.py --players 2,3,4,5 --workers 1   # only the set-ups not solved yet
 .venv/bin/python build_library.py --players 2,3,4,5,6,7,8,9 --workers 1 --no-overcalls   # without overcalls
 ```
 
@@ -65,7 +97,7 @@ therefore loses a lot and a right answer there gains little, while a hard spot g
 K is 40 for the first 30 answers (the rating shows a `?`) and 20 after; decisions within 0.005 BI leave it as is.
 
 Solver processes (CPU cores − 1 by default, `--workers N`) keep about 10 solved spots ready for the
-settings in use, so answers come instantly. The stock is kept in `build/spot_pool/` between runs and
+settings in use, so answers come instantly. The stock is kept in the database between runs and
 can be filled in advance, also while the server runs:
 
 ```bash
@@ -181,7 +213,7 @@ On real stacks it found two shortcuts of the main model:
 
 ## Hand history analysis
 
-Put GG hand histories into `hh/hands/` and tournament summaries into `hh/summaries/` (ignored by git).
+The scripts read the hand histories uploaded to the database.
 
 ```bash
 python3 report.py                                      # structure stats and most frequent spots
@@ -191,7 +223,7 @@ python3 leaks.py build/decisions_bounty_overcalls.csv  # where the EV goes, by s
 .venv/bin/python ev_report.py                          # Rush chipEV/tour and final-table $EV, all-in adjusted
 ```
 
-`ev_report.py` counts every hand whose betting ended before the river with all the remaining cards shown at
+`ev_report.py` prints the results the statistics tab shows (`mbr/results.py`, computing those still missing). It counts every hand whose betting ended before the river with all the remaining cards shown at
 its expectation over the boards still to come (`csrc/showdown.c`, built on first use), and every knockout at
 the mean bounty. At the final table money is ICM of 4/3/2 BI plus the bounties to come split by chips, so the
 others' all-ins count too: they move Hero's money as well.

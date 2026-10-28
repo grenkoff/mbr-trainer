@@ -4,7 +4,7 @@ import sys
 from collections import Counter, defaultdict
 from statistics import mean, median
 
-from mbr.hh import load_hands, load_summaries
+from mbr.db import load_hands, load_summaries
 from mbr.spots import PLACE_PRIZE_BI, hero_knockouts, hero_preflop_spot, stack_bucket, structure_stats
 
 
@@ -12,9 +12,9 @@ def pct(a, b):
     return f"{100 * a / b:.1f}%" if b else "-"
 
 
-def main(hands_dir="hh/hands", summaries_dir="hh/summaries", top=40):
-    tournaments = load_hands(hands_dir)
-    summaries = load_summaries(summaries_dir)
+def main(top=40):
+    tournaments = load_hands()
+    summaries = load_summaries()
     n_hands = sum(map(len, tournaments.values()))
     print(f"Tournaments: {len(tournaments)}, hands: {n_hands}, summaries: {len(summaries)}\n")
 
@@ -74,4 +74,4 @@ def main(hands_dir="hh/hands", summaries_dir="hh/summaries", top=40):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    main(*map(int, sys.argv[1:2]))

@@ -182,10 +182,17 @@ def parse_hand(block):
     return hand
 
 
+def hand_blocks(text):
+    """The text of every hand in a hand history file."""
+    return [b.strip() for b in re.split(r"\n\s*\n(?=Poker Hand #)", text.lstrip("\ufeff")) if b.strip()]
+
+
+def parse_hands_text(text):
+    return [h for b in hand_blocks(text) if (h := parse_hand(b))]
+
+
 def parse_hands_file(path):
-    text = Path(path).read_text(encoding="utf-8-sig")
-    hands = [h for b in re.split(r"\n\s*\n(?=Poker Hand #)", text) if b.strip() and (h := parse_hand(b))]
-    return hands
+    return parse_hands_text(Path(path).read_text(encoding="utf-8-sig"))
 
 
 def load_hands(directory):
@@ -208,18 +215,22 @@ class Summary:
     received: float
 
 
+def parse_summary_text(text):
+    """The Summary of a tournament summary file, or None if it is not one."""
+    vals = {}
+    for line in text.lstrip("\ufeff").splitlines():
+        if (m := SUMMARY_TID_RE.match(line)):
+            vals.update(tid=m["tid"], buyin=float(m["buyin"]))
+        elif (m := SUMMARY_BUYIN_RE.match(line)):
+            vals.update(prize_part=float(m["prize"]), rake=float(m["rake"]), bounty_part=float(m["bounty"]))
+        elif (m := SUMMARY_PLACE_RE.match(line)):
+            vals.update(place=int(m["place"]), received=float(m["won"]))
+    return Summary(**vals) if "tid" in vals and "place" in vals else None
+
+
 def load_summaries(directory):
     out = {}
     for path in sorted(Path(directory).glob("*.txt")):
-        text = Path(path).read_text(encoding="utf-8-sig")
-        vals = {}
-        for line in text.splitlines():
-            if (m := SUMMARY_TID_RE.match(line)):
-                vals.update(tid=m["tid"], buyin=float(m["buyin"]))
-            elif (m := SUMMARY_BUYIN_RE.match(line)):
-                vals.update(prize_part=float(m["prize"]), rake=float(m["rake"]), bounty_part=float(m["bounty"]))
-            elif (m := SUMMARY_PLACE_RE.match(line)):
-                vals.update(place=int(m["place"]), received=float(m["won"]))
-        if "tid" in vals and "place" in vals:
-            out[vals["tid"]] = Summary(**vals)
+        if (s := parse_summary_text(Path(path).read_text(encoding="utf-8-sig"))):
+            out[s.tid] = s
     return out

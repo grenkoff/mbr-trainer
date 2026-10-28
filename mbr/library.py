@@ -1,21 +1,23 @@
 """Solutions of the final-table set-ups from the user's hand histories, solved in advance.
 
-Solving with FGS takes seconds to hours per table, so the trainer reads these instead. One file per
-hand and model in build/library/<model>/<hand_id>.npz holds the strategies and the EVs of every decision,
-with overcalls (at most three players all-in); build/library/<model>-nooc/ holds them without (a shove
-gets one call at most, in the next hand of FGS too). Build or extend it with build_library.py.
+Solving with FGS takes seconds to hours per table, so the trainer reads these instead. The solutions table of
+mbr.db holds one npz file per hand and variant with the strategies and the EVs of every decision: variant
+<model> with overcalls (at most three players all-in), <model>-nooc without (a shove gets one call at most, in
+the next hand of FGS too). The solve queue (mbr.solve_queue) and build_library.py add to it.
 """
 
 import ast
-from pathlib import Path
+import io
 
 import numpy as np
 
+from mbr import db
 from mbr.fgs import MODELS, forced_open, table_for
 from mbr.pushfold import Solver
 
-LIBRARY_DIR = Path(__file__).resolve().parent.parent / "build" / "library"
 LIBRARY_MODELS = {"hrc"}  # models the trainer only serves from the library
+# with overcalls a table takes 20 minutes from 6 players on, days for every player count: up to 5 players only
+OVERCALLS_MAX_PLAYERS = 5
 
 
 def variant(model, overcalls=True):
@@ -23,8 +25,15 @@ def variant(model, overcalls=True):
     return model if overcalls else f"{model}-nooc"
 
 
-def path(model, hand_id, overcalls=True):
-    return LIBRARY_DIR / variant(model, overcalls) / f"{hand_id}.npz"
+def parse_variant(name):
+    """(model, overcalls) of a variant name."""
+    return (name[:-len("-nooc")], False) if name.endswith("-nooc") else (name, True)
+
+
+def variants_for(players, model="hrc"):
+    """The variants a set-up with this many players is solved in: without overcalls always, with them up to
+    OVERCALLS_MAX_PLAYERS."""
+    return [variant(model, False)] + ([variant(model, True)] if players <= OVERCALLS_MAX_PLAYERS else [])
 
 
 def solve(snap, model, overcalls=True):
@@ -36,15 +45,23 @@ def solve(snap, model, overcalls=True):
 
 def save(solver, snap, model, overcalls=True):
     # not solver.overcalls: heads-up has no overcalls, but goes in both variants
-    p = path(model, snap["hand_id"], overcalls)
-    p.parent.mkdir(parents=True, exist_ok=True)
     keys = list(solver.ev)
-    tmp = p.with_suffix(".part.npz")
-    np.savez(tmp, keys=np.array([repr(k) for k in keys]),
+    buf = io.BytesIO()
+    np.savez(buf, keys=np.array([repr(k) for k in keys]),
              strategy=np.array([_strategy(solver, k) for k in keys]),
              ev_play=np.array([solver.ev[k][0] for k in keys]),
              ev_fold=np.array([solver.ev[k][1] for k in keys]))
-    tmp.rename(p)
+    store(snap["hand_id"], variant(model, overcalls), buf.getvalue())
+
+
+def store(hand_id, name, data):
+    """Keep the npz bytes of a solution (of variant `name`)."""
+    with db.connect() as conn:
+        conn.execute("INSERT INTO solutions (hand_id, variant, data) VALUES (%s, %s, %s) ON CONFLICT (hand_id, variant)"
+                     " DO UPDATE SET data = EXCLUDED.data, solved_at = now()", (hand_id, name, data))
+        # the tournament's decisions are scored against it (mbr.results)
+        conn.execute("DELETE FROM tournament_results WHERE tournament_id = (SELECT tournament_id FROM hands WHERE id = %s)",
+                     (hand_id,))
 
 
 def _strategy(solver, key):
@@ -54,14 +71,20 @@ def _strategy(solver, key):
 
 def available(model, overcalls=True):
     """Hand ids solved for the model."""
-    d = LIBRARY_DIR / variant(model, overcalls)
-    return {f.stem for f in d.glob("*.npz") if not f.stem.endswith(".part")} if d.is_dir() else set()
+    with db.connect() as conn:
+        rows = conn.execute("SELECT hand_id FROM solutions WHERE variant = %s", (variant(model, overcalls),))
+        return {r["hand_id"] for r in rows}
 
 
 def load(snap, model, overcalls=True):
     """A Solver holding the stored strategies and EVs (its table is the plain one: enough to read
     frequencies and lines, not to solve again)."""
-    data = np.load(path(model, snap["hand_id"], overcalls))
+    with db.connect() as conn:
+        row = conn.execute("SELECT data FROM solutions WHERE hand_id = %s AND variant = %s",
+                           (snap["hand_id"], variant(model, overcalls))).fetchone()
+    if row is None:
+        raise ValueError(f"{snap['hand_id']} is not solved for {variant(model, overcalls)}")
+    data = np.load(io.BytesIO(row["data"]))
     plain = "bounty" if MODELS[model].get("bounty") else "icm"
     table = table_for(snap["stacks"], snap["sb"], snap["bb"], snap["ante"], plain)
     table.bunching = False

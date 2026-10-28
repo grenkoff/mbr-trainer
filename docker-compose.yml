@@ -1,0 +1,25 @@
+# PostgreSQL for the hand histories, the solver library, the trainer's spot pool and answers (mbr/db.py).
+# Local only: the port is bound to 127.0.0.1, 5433 as 5432 is often taken.
+
+name: mystery-battle-royale
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: mbr
+      POSTGRES_PASSWORD: mbr
+      POSTGRES_DB: mbr
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mbr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

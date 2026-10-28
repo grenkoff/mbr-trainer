@@ -13,7 +13,7 @@ from collections import defaultdict
 from multiprocessing import Pool
 from pathlib import Path
 
-from mbr.hh import load_hands
+from mbr.db import load_hands
 from mbr.pushfold import MEAN_BOUNTY_BI, Solver, table_from_hand
 from mbr.ranges import class_label, class_of_cards
 from mbr.spots import hero_preflop_spot, stack_bucket
@@ -92,14 +92,13 @@ def score(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--hands", default="hh/hands")
     ap.add_argument("--model", choices=MODELS, default="bounty",
                     help="bounty: ICM + KO bounty + future bounties by chips; bounty-now: ICM + KO bounty; icm: no bounties")
     ap.add_argument("--overcalls", action="store_true", help="solve with overcalls and score overcall spots too")
     ap.add_argument("--workers", type=int, default=None, help="solver processes (default: all cores)")
     args = ap.parse_args()
     out_csv = Path(f"build/decisions_{args.model}{'_overcalls' if args.overcalls else ''}.csv")
-    tournaments = load_hands(args.hands)
+    tournaments = load_hands()
     jobs = [c for hands in tournaments.values() for h in hands if h.is_final_stage
             if (c := candidate(h, args.model, args.overcalls))]
     # every scored decision goes to a partial file at once, so an interrupted run resumes where it stopped

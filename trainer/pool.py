@@ -1,11 +1,10 @@
 """Background pool of solved trainer spots.
 
 Worker processes keep solving spots for the settings in use, so a request is answered from stock
-instead of waiting for the solver. The stock lives on disk, one JSON file per spot in a directory per
-settings, which keeps it between runs and lets `python -m trainer.fill` add to it while the server runs.
+instead of waiting for the solver. The stock lives in the spots table of mbr.db, which keeps it between runs
+and lets `python -m trainer.fill` add to it while the server runs.
 """
 
-import json
 import multiprocessing
 import os
 import threading
@@ -13,10 +12,12 @@ import time
 import traceback
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
-from pathlib import Path
+
+from psycopg.types.json import Jsonb
+
+from mbr import db
 
 POOL_VERSION = 6  # bump when the solver or the spot format changes: older stock is then ignored
-POOL_DIR = Path(__file__).resolve().parent.parent / "build" / "spot_pool" / f"v{POOL_VERSION}"
 TARGET = 10  # spots kept ready for each settings in use
 WANTED_FOR = 15 * 60  # seconds after the last request that settings count as in use
 DEFAULTS = {"players": 5, "position": "any", "kind": "any", "bb_min": 5, "bb_max": 20,
@@ -62,9 +63,7 @@ def _solve(params):
 
 
 class SpotPool:
-    def __init__(self, workers=None, directory=POOL_DIR):
-        self.dir = Path(directory)
-        self.dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, workers=None):
         self.workers = workers or max(1, (os.cpu_count() or 2) - 1)
         # one BLAS / solver thread per worker: the workers already use all the cores
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -77,33 +76,29 @@ class SpotPool:
         self.running = Counter()  # key -> spots being solved
         self.errors = {}  # key -> error message for the next request
 
-    # --- stock on disk ----------------------------------------------------
-    def _files(self, key):
-        d = self.dir / key
-        return sorted(d.glob("*.json")) if d.is_dir() else []
-
+    # --- stock in the database --------------------------------------------
     def count(self, key):
-        return len(self._files(key))
+        with db.connect() as conn:
+            return conn.execute("SELECT count(*) AS n FROM spots WHERE pool_version = %s AND key = %s",
+                                (POOL_VERSION, key)).fetchone()["n"]
+
+    def counts(self, keys):
+        with db.connect() as conn:
+            rows = conn.execute("SELECT key, count(*) AS n FROM spots WHERE pool_version = %s AND key = ANY(%s)"
+                                " GROUP BY key", (POOL_VERSION, list(keys))).fetchall()
+        return Counter({r["key"]: r["n"] for r in rows})
 
     def _put(self, key, spot):
-        d = self.dir / key
-        d.mkdir(exist_ok=True)
-        name = f"{time.time_ns()}-{os.getpid()}"
-        tmp = d / f"{name}.part"
-        tmp.write_text(json.dumps(spot))
-        tmp.rename(d / f"{name}.json")
+        with db.connect() as conn:
+            conn.execute("INSERT INTO spots (pool_version, key, spot) VALUES (%s, %s, %s)",
+                         (POOL_VERSION, key, Jsonb(spot)))
 
-    def _take_file(self, key):
-        for f in self._files(key):
-            claimed = f.with_suffix(".taken")
-            try:
-                f.rename(claimed)  # atomic: only one reader wins a file
-            except FileNotFoundError:
-                continue
-            spot = json.loads(claimed.read_text())
-            claimed.unlink()
-            return spot
-        return None
+    def _take(self, key):
+        with db.connect() as conn:  # SKIP LOCKED: only one reader wins a spot
+            row = conn.execute("DELETE FROM spots WHERE id = (SELECT id FROM spots WHERE pool_version = %s AND key = %s"
+                               " ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING spot",
+                               (POOL_VERSION, key)).fetchone()
+        return row["spot"] if row else None
 
     # --- scheduling -------------------------------------------------------
     def want(self, params, target=TARGET):
@@ -121,10 +116,11 @@ class SpotPool:
         for key, (ts, _) in list(self.wanted.items()):
             if now - ts > WANTED_FOR and not self.running[key]:
                 del self.wanted[key]
+        stock = self.counts(self.wanted) if self.wanted else Counter()
         while sum(self.running.values()) < self.workers:
             short = []
             for key, (ts, target) in self.wanted.items():
-                have = self.count(key) + self.running[key]
+                have = stock[key] + self.running[key]
                 if have < target:
                     short.append((have, -ts, key))  # emptiest first, then the most recently requested
             if not short:
@@ -158,7 +154,7 @@ class SpotPool:
         deadline = time.monotonic() + timeout
         with self.cond:
             while True:
-                spot = self._take_file(key)
+                spot = self._take(key)
                 if spot is not None:
                     spot["pool_left"] = self.count(key)
                     self._schedule()
@@ -175,7 +171,8 @@ class SpotPool:
 
     def status(self):
         with self.cond:
-            return {key: {"stock": self.count(key), "solving": self.running[key]} for key in self.wanted}
+            stock = self.counts(self.wanted)
+            return {key: {"stock": stock[key], "solving": self.running[key]} for key in self.wanted}
 
     def shutdown(self):
         self.executor.shutdown(wait=False, cancel_futures=True)

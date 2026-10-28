@@ -110,7 +110,7 @@ def make_spot(players=5, position="any", kind="any", bb_min=5, bb_max=20, diffic
     if stacks not in ("random", "history"):
         raise ValueError(f"unknown stacks source {stacks}")
     if stacks == "history" and not real_stacks.snapshots():
-        raise ValueError(f"no hand histories in {real_stacks.HANDS_DIR}")
+        raise ValueError("no final-table hands uploaded yet")
     rng = random.Random(seed)
     for attempt in range(MAX_ATTEMPTS):
         spot = _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, overcalls, stacks,

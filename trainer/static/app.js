@@ -14,7 +14,8 @@ const DIFF_NAME = { natural: "Как в игре", easy: "Легко", medium: "
 const PLAYERS_NAME = Object.fromEntries([2, 3, 4, 5, 6, 7, 8, 9].map((n) => [n, `${n} ${n < 5 ? "игрока" : "игроков"}`]));
 const KIND_NAME = { open: "Опен-пуш", call: "Колл пуша", overcall: "Оверколл" };
 const CLOSE_EV = 0.005; // decisions this close in EV count as correct either way
-const STATS_KEY = "mbr-trainer-stats-v1";
+const STATS_KEY = "mbr-trainer-stats-v1"; // the answers kept in the browser before the database: moved once
+const STATS_MOVED_KEY = "mbr-trainer-stats-moved";
 const RATING_START = 1500;
 const RATING_PROVISIONAL = 30; // rated answers with the bigger K, while the rating is still finding its level
 const SETTINGS_KEY = "mbr-trainer-settings-v1";
@@ -45,7 +46,7 @@ const settings = Object.assign(
 if (!Array.isArray(settings.players)) settings.players = [+settings.players || 3]; // saved before multi-select
 settings.players = settings.players.filter((n) => ENABLED_PLAYERS.includes(n));
 if (!settings.players.length) settings.players = [ENABLED_PLAYERS[0]];
-let stats = load(STATS_KEY, []);
+let stats = []; // every answer, as stored on the server (/api/answers)
 const history = []; // this session: {spot, choice, correct, cost}
 
 let current = null;   // spot being shown
@@ -497,8 +498,7 @@ function answer(choice) {
     hand: current.hand, correct, cost, gap, rating: before + delta,
   };
   stats.push(record);
-  if (stats.length > 5000) stats = stats.slice(-5000);
-  save(STATS_KEY, stats);
+  postAnswers(record);
   history.unshift({ spot: current, ...answered });
   showSpot(current, answered);
   renderHistory();
@@ -656,11 +656,32 @@ $("history").addEventListener("click", (e) => {
   showSpot(h.spot, { choice: h.choice, correct: h.correct, cost: h.cost, delta: h.delta });
 });
 
-$("btnReset").addEventListener("click", () => {
+$("btnReset").addEventListener("click", async () => {
   stats = [];
-  save(STATS_KEY, stats);
   renderStats();
+  try { await fetch("/api/answers", { method: "DELETE" }); } catch (e) { console.error("reset failed", e); }
 });
+
+async function postAnswers(records) {
+  try {
+    const r = await fetch("/api/answers", { method: "POST", body: JSON.stringify(records) });
+    if (!r.ok) throw new Error(r.status);
+    return true;
+  } catch (e) {
+    console.error("the answer was not stored", e);
+    return false;
+  }
+}
+
+/** The answers from the server; those kept in this browser before go there once. */
+async function loadAnswers() {
+  stats = await (await fetch("/api/answers")).json();
+  const local = load(STATS_KEY, []);
+  if (!stats.length && local.length && !load(STATS_MOVED_KEY, false) && await postAnswers(local)) {
+    stats = local;
+    save(STATS_MOVED_KEY, true);
+  }
+}
 
 /* ---------------- controls ---------------- */
 
@@ -695,7 +716,7 @@ document.addEventListener("keydown", (e) => {
   else if ((k === " " || k === "enter") && answered) { e.preventDefault(); nextSpot(); }
 });
 
-async function init() {
+async function loadInfo() {
   try {
     const info = await (await fetch("/api/info")).json();
     overcallsAvailable = !!info.overcalls;
@@ -706,11 +727,26 @@ async function init() {
   } catch (e) {
     overcallsAvailable = false;
   }
+}
+
+async function init() {
+  await loadInfo();
+  try { await loadAnswers(); } catch (e) { console.error("answers not loaded", e); }
   setupSettings();
   rerate();
-  save(STATS_KEY, stats);
   renderStats();
   nextSpot();
 }
 
-init();
+// the trainer starts when its tab is first shown; later the library may have grown from uploads
+let started = false;
+document.addEventListener("tabshown", async (e) => {
+  if (e.detail !== "trainer") return;
+  if (!started) {
+    started = true;
+    init();
+  } else {
+    await loadInfo();
+    refreshSettingsUI(); // the counts of hands solved
+  }
+});
