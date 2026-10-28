@@ -196,6 +196,11 @@ its expectation over the boards still to come (`csrc/showdown.c`, built on first
 the mean bounty. At the final table money is ICM of 4/3/2 BI plus the bounties to come split by chips, so the
 others' all-ins count too: they move Hero's money as well.
 
+Bounties are paid from 9th place on, so when the Rush stage ends below 9 players (several tables bust at once), a
+knockout in its last hand may pay one too. Which of Hero's knockouts there were paid is not in the hand history: the
+report takes the number whose envelopes most likely add up, with the final-table ones, to the bounties of the
+summary. It also lists the tournaments whose bounties no envelopes of their knockouts add up to.
+
 ## Equity tables
 
 `data/equity_169.txt` holds Monte Carlo all-in equities for the 169x169 hand classes. To regenerate it:

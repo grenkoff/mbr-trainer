@@ -5,6 +5,10 @@ expectation over the boards still to come, whoever played it: at the final table
 Hero's money too. Money is valued as the "bounty" model does (ICM of 4/3/2 BI plus the bounties still to
 come split by chips), with every knockout at the mean bounty of 0.945 BI instead of the envelope drawn.
 
+Bounties are paid from 9th place on, so a knockout in the last Rush hands pays one too when the final table starts
+with fewer than 9 players. Which of Hero's knockouts there were paid is not in the hand history: it is read from the
+bounties of the tournament summary, as the number of envelopes that most likely adds up to them.
+
     .venv/bin/python ev_report.py
 """
 
@@ -22,6 +26,9 @@ from mbr.spots import PLACE_PRIZE_BI
 STREET_BOARD = {"PRE": 0, "FLOP": 3, "TURN": 4, "RIVER": 5}
 BETTING = ("fold", "check", "call", "bet", "raise")
 VALUES = Table(names=[], stacks=[], posted=[], bb=1)  # only its values(): ICM + bounties
+# mystery bounty envelopes of the $1 tournaments in BI: frequency per 100M (mean 0.945)
+ENVELOPES = {10000: 60, 1000: 400, 100: 4000, 10: 3_500_000, 2: 3_600_000, 1.5: 3_800_000, 1: 4_000_000,
+             0.75: 23_000_000, 0.5: 33_704_460, 0.25: 28_391_080}
 
 
 def outcomes(hand):
@@ -69,39 +76,83 @@ def hero_value(hand, stacks, kos=None):
     return v[names.index("Hero")]
 
 
-def tournament(hands):
+def tournament(hands, summary=None):
     """Per tournament: Rush chips (actual, all-in adjusted), final-table value at the start and its change
-    (actual, adjusted; the adjusted one also split into Hero's hands and the others'), knockouts."""
+    (actual, adjusted; the adjusted one also split into Hero's hands and the others'), knockouts with a bounty
+    (at the final table, at the end of the Rush stage: actual and expected) and the bounties received."""
     r = Counter()
     ft_started = False
+    ft_shares = []  # Hero's share of every bounty won at the final table
+    last_rush = rush_end = None
     for hand in hands:
         outs, adjusted = outcomes(hand)
         actual = None if adjusted else outs[0]
         hero_in = not any(a.verb == "fold" and a.name == "Hero" for a in hand.actions)
+        final = hand.final_stacks()
+        if actual is None:  # the adjusted hand as it really ran out: the full board
+            real = outcomes_on_board(hand)
+            actual = real if real else (1.0, final, {})
         if not hand.is_final_stage:
-            r["rush_actual"] += hand.final_stacks()["Hero"] - hand.stacks["Hero"]
+            r["rush_actual"] += final["Hero"] - hand.stacks["Hero"]
             r["rush_ev"] += sum(p * s["Hero"] for p, s, _ in outs) - hand.stacks["Hero"]
             r["rush_adjusted"] += adjusted and hero_in
+            last_rush = hand, outs, actual
             continue
         if not ft_started:
             ft_started = True
             r["ft"] = 1
             r["v0"] = hero_value(hand, hand.stacks)
+            if len(hand.players) < 9 and last_rush:  # the Rush stage ended below 9 players
+                rush_end = last_rush, 9 - len(hand.players)
         before = hero_value(hand, hand.stacks)
         ev = sum(p * hero_value(hand, s, k) for p, s, k in outs)
-        final = hand.final_stacks()
         busted = {x for x in hand.players if final[x] <= 0 and hand.stacks[x] > 0}
-        if actual is None:  # the adjusted hand as it really ran out: the full board
-            real = outcomes_on_board(hand)
-            actual = real if real else (1.0, final, {})
         r["ft_actual"] += hero_value(hand, actual[1], actual[2]) - before
         r["ft_ev"] += ev - before
         r["ft_ev_hero" if hero_in else "ft_ev_others"] += ev - before
         r["ft_actual_hero" if hero_in else "ft_actual_others"] += hero_value(hand, actual[1], actual[2]) - before
-        r["kos"] += sum(share for x in busted for w, share in actual[2].get(x, []) if w == "Hero")
+        ft_shares += [share for x in busted for w, share in actual[2].get(x, []) if w == "Hero"]
         # the run-out on the real board must give the chips of the hand history (an odd chip aside)
         r["check"] = max(r["check"], max(abs(actual[1][n] - final[n]) for n in final))
+    r["kos"] = sum(ft_shares)
+    paid = []
+    if summary:
+        r["bounties"] = (summary.received - summary.buyin * PLACE_PRIZE_BI.get(summary.place, 0)) / summary.buyin
+    if rush_end:
+        (hand, outs, actual), slots = rush_end
+        # Hero's knockouts in the last Rush hand, best place first: players busted together finish in order of
+        # their stacks, and the first `slots` of them (from 9th place on) were paid
+        mine = sorted(((x, share) for x, ws in actual[2].items() for w, share in ws if w == "Hero"),
+                      key=lambda xs: -hand.stacks[xs[0]])
+        r["rush_candidates"] = len(mine)
+        paid = paid_knockouts(r["bounties"], ft_shares, [share for _, share in mine][:slots]) if summary else []
+        r["rush_kos"] = sum(paid)
+        names = [x for x, _ in mine[:len(paid)]]
+        r["rush_kos_ev"] = sum(p * share for p, _, kos in outs for x in names for w, share in kos.get(x, [])
+                               if w == "Hero")
+    r["unexplained"] = summary is not None and not bounty_likelihood(r["bounties"], ft_shares + paid)
     return r
+
+
+def paid_knockouts(bounties, ft_shares, candidates):
+    """The shares of the first of candidates (Hero's knockouts at the end of the Rush stage, best place first)
+    whose bounties were paid: as many as most likely add up, with the final table ones, to the bounties received
+    (in BI)."""
+    best = max(range(len(candidates) + 1), key=lambda m: bounty_likelihood(bounties, ft_shares + candidates[:m]))
+    return candidates[:best]
+
+
+def bounty_likelihood(bounties, shares):
+    """The probability that envelopes won with these shares add up to the bounties received (in BI)."""
+    dist = {0.0: 1.0}
+    for share in shares:
+        nxt = Counter()
+        for total, p in dist.items():
+            for value, freq in ENVELOPES.items():
+                nxt[round(total + share * value, 3)] += p * freq / 1e8
+        dist = nxt
+    # GG rounds a split bounty to the cent
+    return sum(p for total, p in dist.items() if abs(total - bounties) < 0.011)
 
 
 def outcomes_on_board(hand):
@@ -141,9 +192,9 @@ def main(hands_dir="hh/hands", summaries_dir="hh/summaries"):
     rows = []
     for k, (tid, hands) in enumerate(sorted(tours.items()), 1):
         cool_down()
-        r = tournament(hands)
-        print(f"  {k}/{len(tours)}", file=sys.stderr, flush=True)
         s = summaries.get(tid)
+        r = tournament(hands, s)
+        print(f"  {k}/{len(tours)}", file=sys.stderr, flush=True)
         r["roi"] = s.received / s.buyin - 1 if s else 0.0
         r["place_prize"] = PLACE_PRIZE_BI.get(s.place, 0) if s else 0
         rows.append(r)
@@ -167,16 +218,25 @@ def main(hands_dir="hh/hands", summaries_dir="hh/summaries"):
     luck = lambda key: mean(col(f"ft_actual_{key}", ft)) - mean(col(f"ft_ev_{key}", ft))
     print(f"  all-in luck: {luck('hero'):+.3f} in Hero's hands, {luck('others'):+.3f} in the others' (Hero folded)")
     print(f"  knockouts by Hero:            {mean(col('kos', ft)):.2f} per final table")
+    kos, rush_kos = sum(col("kos")), sum(col("rush_kos"))
+    print(f"\nKnockouts with a bounty: {kos:g} at the final table, {rush_kos:g} at the end of the Rush stage "
+          f"(of Hero's {sum(col('rush_candidates'))} there when it ended below 9 players)")
+    print(f"  bounties received: {sum(col('bounties')):.2f} BI, {sum(col('bounties')) / (kos + rush_kos):.3f} "
+          f"per knockout (mean bounty {MEAN_BOUNTY_BI})")
+    odd = [tid for tid, r in zip(sorted(tours), rows) if r["unexplained"]]
+    if odd:
+        print(f"  warning: bounties that no envelopes of the knockouts add up to: {', '.join(odd)}")
     print("\nPer tournament, BI (break-even 0):")
-    norm = [r["v0"] + r["ft_actual"] - 1 for r in rows]
-    ev = [r["v0"] + r["ft_ev"] - 1 for r in rows]
+    # the bounties of the knockouts at the end of the Rush stage: as they happened, at their all-in expectation
+    norm = [r["v0"] + r["ft_actual"] + r["rush_kos"] * MEAN_BOUNTY_BI - 1 for r in rows]
+    ev = [r["v0"] + r["ft_ev"] + r["rush_kos_ev"] * MEAN_BOUNTY_BI - 1 for r in rows]
     print(f"  ROI, bounties as drawn:       {fmt(stat(col('roi')))}")
     print(f"  ROI, mean bounties:           {fmt(stat(norm))}")
     print(f"  ROI, mean bounties, final table all-in adjusted: {fmt(stat(ev))}")
     # the Rush chips in money at their average worth: 18 x 0.92 BI of prizes and bounties for 18000 chips
-    full = [(1000 + r["rush_ev"]) * 0.92 / 1000 + r["ft_ev"] - 1 for r in rows]
+    full = [(1000 + r["rush_ev"]) * 0.92 / 1000 + r["ft_ev"] + r["rush_kos_ev"] * MEAN_BOUNTY_BI - 1 for r in rows]
     print(f"  ROI, mean bounties, all-in adjusted throughout (Rush chips at 0.92 mBI): {fmt(stat(full))}")
-    check = [r["place_prize"] + r["kos"] * MEAN_BOUNTY_BI - 1 for r in rows]
+    check = [r["place_prize"] + (r["kos"] + r["rush_kos"]) * MEAN_BOUNTY_BI - 1 for r in rows]
     print(f"  (place prizes + knockouts x 0.945 - 1 from the summaries: {mean(check):+.3f})")
 
 
