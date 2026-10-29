@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 from psycopg.types.json import Jsonb
 
 from mbr import db, equity3, importer, library, real_stacks, results, stats
+from mbr import solve_queue
 from mbr.solve_queue import SolveQueue
 from trainer.pool import SpotPool
 
@@ -122,6 +123,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(e)})
                 return
             self._json(200, {**body, "results": self.results.status()})
+            return
+        if url.path == "/api/decisions":
+            # Hero's scored final-table push/fold decisions, only the mistakes unless all=1
+            every = parse_qs(url.query).get("all") == ["1"]
+            rows = [{**d, "tid": tid, "date": r.get("date"), "buyin": r.get("buyin"), "place": r.get("place")}
+                    for tid, r in results.load().items() for d in r.get("decisions", []) if every or d["loss"] > 0]
+            progress = solve_queue.progress()
+            self._json(200, {"decisions": rows, "results": self.results.status(),
+                             "solved": sum(g["done"] for g in progress), "needed": sum(g["total"] for g in progress)})
+            return
+        if url.path == "/api/hand":
+            detail = results.hand_detail(parse_qs(url.query).get("id", [""])[0])
+            if detail is None:
+                self._json(404, {"error": "no such hand"})
+            else:
+                self._json(200, detail)
             return
         if url.path == "/api/answers":
             with db.connect() as conn:

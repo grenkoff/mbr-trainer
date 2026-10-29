@@ -18,6 +18,7 @@ from collections import Counter
 from psycopg.types.json import Jsonb
 
 from mbr import db, library
+from mbr.hh import parse_hand
 from mbr.pushfold import MEAN_BOUNTY_BI, Table, table_from_hand
 from mbr.ranges import class_label, class_of_cards
 from mbr.showdown import rankings, split_pots
@@ -210,10 +211,11 @@ def preflop(hands):
 MAX_EFF_BB = 20  # deeper decisions are not push/fold
 
 
-def decision(hand, setups):
+def decision(hand, setups, with_range=False):
     """Hero's final-table push/fold decision scored against the HRC library, or None: open shove or fold, call
     or fold facing a lone shove, overcall or fold facing a shove and a call. With overcalls up to
-    OVERCALLS_MAX_PLAYERS, without them beyond. Limps and smaller raises are not scored."""
+    OVERCALLS_MAX_PLAYERS, without them beyond. Limps and smaller raises are not scored.
+    with_range adds HRC's frequency of playing and EV of playing less folding for each of the 169 hands."""
     setup = setups.get(hand.hand_id)
     spot = hero_preflop_spot(hand)
     if setup is None or setup["forced"] or spot is None or spot.eff_bb > MAX_EFF_BB or not hand.hero_cards:
@@ -245,11 +247,16 @@ def decision(hand, setups):
     if action == "other":
         return None
     best = "play" if ev_play > ev_fold else "fold"
-    return {"hand_id": hand.hand_id, "kind": kind, "players": len(names), "position": spot.position,
-            "eff_bb": round(spot.eff_bb, 1), "bucket": stack_bucket(spot.eff_bb), "cards": hand.hero_cards,
-            "class": class_label(cls), "action": action, "best": best, "freq": round(freq, 3),
-            "ev_play": round(ev_play, 4), "ev_fold": round(ev_fold, 4),
-            "loss": round(abs(ev_play - ev_fold), 4) if action != best else 0.0, "overcalls": overcalls}
+    out = {"hand_id": hand.hand_id, "kind": kind, "players": len(names), "position": spot.position,
+           "eff_bb": round(spot.eff_bb, 1), "bucket": stack_bucket(spot.eff_bb), "cards": hand.hero_cards,
+           "class": class_label(cls), "action": action, "best": best, "freq": round(freq, 3),
+           "ev_play": round(ev_play, 4), "ev_fold": round(ev_fold, 4),
+           "loss": round(abs(ev_play - ev_fold), 4) if action != best else 0.0, "overcalls": overcalls}
+    if with_range:
+        play = target[key[1] if key[0] == "push" else key[1:]]
+        out["range"] = {"hand_class": cls, "freq": [round(float(f), 3) for f in play],
+                        "ev_diff": [round(float(e) - ev_fold, 4) for e in solver.ev[key][0]]}
+    return out
 
 
 def compute(hands, summary, setups):
@@ -265,7 +272,8 @@ def compute(hands, summary, setups):
     return data
 
 
-def _setups(conn, tournament_ids):
+def setups_for(conn, tournament_ids):
+    """{hand id: set-up, with the variants solved} of these tournaments' final-table hands."""
     rows = conn.execute("SELECT u.*, array_remove(array_agg(s.variant), NULL) AS solved FROM setups u"
                         " JOIN hands h ON h.id = u.hand_id LEFT JOIN solutions s ON s.hand_id = u.hand_id"
                         " WHERE h.tournament_id = ANY(%s) GROUP BY u.hand_id", (list(tournament_ids),))
@@ -296,12 +304,23 @@ def update(tournament_ids, log=None, stop=None):
         cool_down(log=log)
         hands = db.load_hands([tid]).get(tid, [])
         with db.connect() as conn:
-            data = compute(hands, summaries.get(tid), _setups(conn, [tid]))
+            data = compute(hands, summaries.get(tid), setups_for(conn, [tid]))
             conn.execute("INSERT INTO tournament_results (tournament_id, version, data) VALUES (%s, %s, %s)"
                          " ON CONFLICT (tournament_id) DO UPDATE SET version = EXCLUDED.version, data = EXCLUDED.data",
                          (tid, VERSION, Jsonb(data)))
         if log:
             log(f"{k}/{len(tournament_ids)}")
+
+
+def hand_detail(hand_id):
+    """A hand's history text and Hero's scored decision in it with HRC's range, or None if it is not uploaded."""
+    with db.connect() as conn:
+        row = conn.execute("SELECT raw, tournament_id FROM hands WHERE id = %s", (hand_id,)).fetchone()
+        if row is None:
+            return None
+        hand = parse_hand(row["raw"])
+        return {"hand_id": hand_id, "tid": row["tournament_id"], "text": row["raw"],
+                "decision": decision(hand, setups_for(conn, [row["tournament_id"]]), with_range=True)}
 
 
 def load():

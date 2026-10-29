@@ -266,7 +266,9 @@ kbd {
   .layout { grid-template-columns: 1fr; padding: 10px 16px; }
   .page { padding: 10px 16px; }
   .two-col { grid-template-columns: 1fr; }
-  .topbar { flex-wrap: wrap; }
+  .topbar { flex-wrap: wrap; padding: 10px 16px; }
+  .tabs { order: 3; flex: 1 0 100%; gap: 2px; margin: 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs a { padding: 6px 6px; font-size: 14px; white-space: nowrap; }
   .felt { margin: 40px 30px 50px; }
   .seat { width: 92px; font-size: 12px; }
 }
@@ -284,3 +286,29 @@ kbd {
   .data .bar-cell { display: none; }
   .data th, .data td { padding: 5px 6px; }
 }
+
+/* mistakes tab */
+#mistakesPage { display: grid; gap: 16px; }
+#mistakesPage > * { min-width: 0; }
+.filters .toggle { margin-top: 0; }
+.decision-row { cursor: pointer; }
+.decision-row:hover td, .decision-row.open td { background: var(--panel-2); }
+.decision-row.ok td { color: var(--muted); }
+.card-text { font-weight: 700; margin-right: 2px; }
+.card-text.red { color: #ff6b6b; }
+.data .hand-detail > td { white-space: normal; text-align: left; padding: 14px 10px 18px; background: #13171c; }
+/* stays in view while the wide table scrolls sideways on a phone */
+.hand-view {
+  display: grid; grid-template-columns: 230px minmax(0, 560px); gap: 20px; align-items: start;
+  position: sticky; left: 10px; max-width: calc(100vw - 90px);
+}
+.hand-side { display: flex; flex-direction: column; gap: 12px; }
+.hh-wrap { grid-column: 1 / -1; }
+.hh-wrap summary { cursor: pointer; color: var(--muted); }
+.hh {
+  margin: 8px 0 0; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; overflow-x: auto;
+  font-size: 12px; line-height: 1.45; max-height: 420px; color-scheme: dark;
+}
+@media (max-width: 700px) { .hand-view { grid-template-columns: minmax(0, 1fr); } }
+.data.decisions th, .data.decisions td { text-align: left; }
+.data.decisions :is(th, td):is(:nth-child(3), :nth-child(5), :nth-child(10)) { text-align: right; }

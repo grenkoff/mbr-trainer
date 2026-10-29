@@ -1,7 +1,7 @@
 "use strict";
 
 // tabs by the URL hash: each tab's script listens for "tabshown" with its name
-const TABS = ["upload", "stats", "trainer"];
+const TABS = ["upload", "stats", "mistakes", "trainer"];
 
 function showTab() {
   const name = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "trainer";
