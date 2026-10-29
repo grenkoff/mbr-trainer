@@ -25,7 +25,7 @@ The solver runs in Rust when `rust/target/release/libmbr_solver.so` exists, unle
 .venv/bin/python -m trainer          # http://localhost:8765
 ```
 
-Four tabs:
+Five tabs:
 - **Upload**: GG hand histories and tournament summaries, as .txt files, folders or zip archives. Hands and
   summaries already in the database are skipped. The new final-table set-ups are solved in the background with
   the HRC model (2-5 players with overcalls and without, 6-9 without; `--solve-workers`, 1 by default), pausing
@@ -46,6 +46,16 @@ Four tabs:
   by player count, decision and position, costliest or newest first. A hand opens with its history, the EV of
   playing and folding and HRC's range for the decision, Hero's hand marked, and opens in the trainer as it was
   dealt (`#trainer/<hand id>`); answers there count neither in the statistics nor in the rating.
+- **Opponents**: the average opponent, everybody but Hero in the uploaded hands together (`mbr/opponents.py`), for a
+  date range and buy-in, Rush or final table:
+  - preflop stats as Hero's, with Hero's beside them;
+  - final-table push/fold decisions against HRC by decision, position and stack: how often they play against how much
+    of the hands HRC plays there, their limps and raises short of all-in apart, and of the hands they showed, those
+    HRC folds and what they cost;
+  - the hands they showed calling a shove (always shown, so the whole calling range) or open-shoving (only when
+    called), as a 13x13 grid by effective stack.
+
+  Computed per tournament in the background after Hero's results, with the same CPU guard.
 - **Trainer**, below.
 
 All of it lives in PostgreSQL (`mbr/db.py`): the hands and summaries, the final-table set-ups, the solver library,

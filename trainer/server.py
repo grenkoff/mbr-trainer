@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from psycopg.types.json import Jsonb
 
-from mbr import db, equity3, importer, library, real_stacks, results, stats, trainer
+from mbr import db, equity3, importer, library, opponents, real_stacks, results, stats, trainer
 from mbr import solve_queue
 from mbr.solve_queue import SolveQueue
 from trainer.pool import SpotPool
@@ -119,6 +119,16 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 body = stats.summary(results.load(), q.get("from") or None, q.get("to") or None,
                                      float(q["buyin"]) if q.get("buyin") else None)
+            except ValueError as e:
+                self._json(400, {"error": str(e)})
+                return
+            self._json(200, {**body, "results": self.results.status()})
+            return
+        if url.path == "/api/opponents":
+            q = {k: v[0] for k, v in parse_qs(url.query).items()}
+            try:
+                body = stats.opponents_summary(opponents.load(), results.load(), q.get("from") or None,
+                                               q.get("to") or None, float(q["buyin"]) if q.get("buyin") else None)
             except ValueError as e:
                 self._json(400, {"error": str(e)})
                 return

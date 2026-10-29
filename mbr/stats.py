@@ -38,10 +38,7 @@ def tournament_row(tid, r):
 
 def summary(results, date_from=None, date_to=None, buyin=None):
     """Everything the statistics tab shows for the tournaments in the filters (dates as YYYY-MM-DD)."""
-    picked = {tid: r for tid, r in results.items()
-              if (not date_from or (r.get("date") or "")[:10] >= date_from)
-              and (not date_to or (r.get("date") or "")[:10] <= date_to)
-              and (buyin is None or r.get("buyin") == buyin)}
+    picked = _picked(results, date_from, date_to, buyin)
     rows = sorted((tournament_row(tid, r) for tid, r in picked.items()), key=lambda t: (t["date"] or "", t["tid"]))
     ft = [r for tid, r in picked.items() if r.get("ft")]
     places = Counter(t["place"] for t in rows if t["place"])
@@ -99,3 +96,53 @@ def _decisions(results):
     return {"decisions": len(ds), "mistakes": sum(d["loss"] > 0 for d in ds), "loss": sum(d["loss"] for d in ds),
             "by_position": group("position"), "by_bucket": group("bucket"),
             "worst": sorted((d for d in ds if d["loss"] > 0), key=lambda d: -d["loss"])[:WORST]}
+
+
+def _picked(results, date_from, date_to, buyin):
+    return {tid: r for tid, r in results.items()
+            if (not date_from or (r.get("date") or "")[:10] >= date_from)
+            and (not date_to or (r.get("date") or "")[:10] <= date_to)
+            and (buyin is None or r.get("buyin") == buyin)}
+
+
+def opponents_summary(theirs, hero, date_from=None, date_to=None, buyin=None):
+    """Everything the average opponent tab shows, from mbr.opponents data (and Hero's mbr.results to compare)."""
+    picked = _picked(theirs, date_from, date_to, buyin)
+    shown = defaultdict(lambda: [0] * 169)
+    for r in picked.values():
+        for key, counts in r.get("shown", {}).items():
+            for cls, n in counts.items():
+                shown[key][int(cls)] += n
+    return {"tournaments": len(picked), "preflop": _preflop(picked.values()),
+            "hero_preflop": _preflop(_picked(hero, date_from, date_to, buyin).values()),
+            "decisions": _their_decisions(picked.values()), "shown": dict(shown),
+            "buyins": sorted({r.get("buyin") for r in theirs.values() if r.get("buyin") is not None})}
+
+
+def _their_decisions(results):
+    """The opponents' push/fold decisions against HRC by decision and position and by decision and stack:
+    how often they play and how much of the hands HRC plays; of their shown hands, those HRC folds. Limps and
+    raises short of all-in (other) are counted apart."""
+    ds = [d for r in results for d in r.get("decisions", [])]
+
+    def group(key):
+        out = defaultdict(lambda: Counter(decisions=0, plays=0, hrc=0.0, shown=0, shown_hrc_folds=0, loss=0.0,
+                                          other=0))
+        for d in ds:
+            for g in (out[d["kind"], d[key]], out[d["kind"], "all"]):
+                if d["action"] == "other":
+                    g["other"] += 1
+                    continue
+                g["decisions"] += 1
+                g["plays"] += d["action"] == "play"
+                g["hrc"] += d["range_pct"] / 100
+                if d["action"] == "play" and "best" in d:
+                    g["shown"] += 1
+                    g["shown_hrc_folds"] += d["best"] == "fold"
+                    g["loss"] += d["loss"]
+        order = (POSITION_ORDER if key == "position" else BUCKET_ORDER) + ["all"]
+        return [[kind, k, dict(out[kind, k])] for kind in ("open", "call", "overcall") for k in order
+                if (kind, k) in out]
+
+    return {"decisions": sum(d["action"] != "other" for d in ds), "by_position": group("position"),
+            "by_bucket": group("bucket")}

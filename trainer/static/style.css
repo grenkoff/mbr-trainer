@@ -314,3 +314,15 @@ kbd {
 .data.decisions :is(th, td):is(:nth-child(3), :nth-child(5), :nth-child(10)) { text-align: right; }
 .hand-side .btn { align-self: start; text-decoration: none; }
 .review-note { color: var(--muted); font-size: 13px; }
+
+/* average opponent tab */
+#opponentsPage { display: grid; gap: 16px; }
+#opponentsPage > * { min-width: 0; }
+.data tr.total td { border-bottom-color: #3b4552; }
+.field-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); margin: 0 0 6px; white-space: nowrap; }
+.field-inline select {
+  padding: 4px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+  font: inherit; color-scheme: dark;
+}
+.shown-grid { margin-top: 10px; }
+.data.kind-table :is(th, td):nth-child(2) { text-align: left; }

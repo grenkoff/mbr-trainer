@@ -59,9 +59,10 @@ def store(hand_id, name, data):
     with db.connect() as conn:
         conn.execute("INSERT INTO solutions (hand_id, variant, data) VALUES (%s, %s, %s) ON CONFLICT (hand_id, variant)"
                      " DO UPDATE SET data = EXCLUDED.data, solved_at = now()", (hand_id, name, data))
-        # the tournament's decisions are scored against it (mbr.results)
-        conn.execute("DELETE FROM tournament_results WHERE tournament_id = (SELECT tournament_id FROM hands WHERE id = %s)",
-                     (hand_id,))
+        # the tournament's decisions are scored against it (mbr.results, mbr.opponents)
+        for table in ("tournament_results", "opponent_results"):
+            conn.execute(f"DELETE FROM {table} WHERE tournament_id = (SELECT tournament_id FROM hands WHERE id = %s)",
+                         (hand_id,))
 
 
 def _strategy(solver, key):

@@ -154,17 +154,17 @@ function totalsHtml(t) {
   </table></div></div>`;
 }
 
-function preflopHtml(p) {
+function preflopHtml(p, who = "Hero") { // who: whose stats, as the hint and the stack column name him
   if (!p) return `<p class="muted">Нет раздач.</p>`;
   const cell = (a, b) => (b ? `${(100 * a / b).toFixed(0)}% <span class="muted">${b}</span>` : `<span class="muted">—</span>`);
   const line = (label, c) => `<tr><td>${label}</td><td>${c.hands}</td><td>${cell(c.vpip, c.hands)}</td><td>${cell(c.pfr, c.hands)}</td>
     <td>${cell(c.rfi, c.rfi_opp)}</td><td>${cell(c.open_shove, c.rfi_opp)}</td><td>${cell(c.limp, c.rfi_opp)}</td>
     <td>${cell(c.threebet, c.threebet_opp)}</td><td>${cell(c.vs_shove_call, c.vs_shove_opp)}</td></tr>`;
   const head = (first) => `<tr><th>${first}</th><th>Раздач</th><th>VPIP</th><th>PFR</th><th>Первым в банк</th><th>Опен-пуш</th><th>Лимп</th><th>3-бет</th><th>Колл пуша</th></tr>`;
-  return `<p class="hint">Проценты от возможностей, мелким шрифтом — сколько их было. «Первым в банк», «Опен-пуш» и «Лимп» — когда до Hero все сбросили;
+  return `<p class="hint">Проценты от возможностей, мелким шрифтом — сколько их было. «Первым в банк», «Опен-пуш» и «Лимп» — когда до ${who === "Hero" ? "Hero" : "игрока"} все сбросили;
     «3-бет» — против одного рейза; «Колл пуша» — против одного олл-ина (колл или ответный олл-ин).</p>
     <div class="table-scroll"><table class="data">${head("Позиция")}${p.positions.map(([k, c]) => line(k, c)).join("")}${line("<b>Всего</b>", p.total)}</table></div>
-    <div class="table-scroll"><table class="data">${head("Стек Hero")}${p.buckets.map(([k, c]) => line(k, c)).join("")}</table></div>`;
+    <div class="table-scroll"><table class="data">${head(who === "Hero" ? "Стек Hero" : "Стек игрока")}${p.buckets.map(([k, c]) => line(k, c)).join("")}</table></div>`;
 }
 
 function decisionsHtml(d, tournaments) {

@@ -31,27 +31,32 @@ class Spot:
 
 def hero_preflop_spot(hand):
     """Hero's first voluntary preflop decision in a hand, or None."""
-    if "Hero" not in hand.stacks:
+    return preflop_spot(hand, "Hero")
+
+
+def preflop_spot(hand, name):
+    """A player's first voluntary preflop decision in a hand, or None (the Spot's hero_* fields are his)."""
+    if name not in hand.stacks:
         return None
     stacks = hand.stacks
     pos = hand.positions()
     pre = [a for a in hand.actions if a.street == "PRE" and a.verb not in ("ante", "sb", "bb", "show")]
-    hero_idx = next((i for i, a in enumerate(pre) if a.name == "Hero"), None)
+    hero_idx = next((i for i, a in enumerate(pre) if a.name == name), None)
     if hero_idx is None:
-        return None  # Hero was all-in from posting blinds
+        return None  # all-in from posting blinds
     before = pre[:hero_idx]
     raises = [a for a in before if a.verb in ("raise", "bet")]
     allins = [a for a in before if a.all_in and a.verb in ("raise", "bet", "call")]
     calls = [a for a in before if a.verb == "call"]
-    hero_stack = stacks["Hero"]
+    hero_stack = stacks[name]
 
     if not raises:
         facing = "limp" if calls else "unopened"
         acted = {a.name for a in before}
-        behind = [n for n in hand.players if n != "Hero" and n not in acted]
-        # players still to act after Hero (folded players removed)
+        behind = [n for n in hand.players if n != name and n not in acted]
+        # players still to act after him (folded players removed)
         folded = {a.name for a in before if a.verb == "fold"}
-        opponents = [n for n in hand.players if n != "Hero" and n not in folded]
+        opponents = [n for n in hand.players if n != name and n not in folded]
         biggest = max((stacks[n] for n in opponents), default=0)
         eff = min(hero_stack, biggest)
         covered_by = sum(stacks[n] > hero_stack for n in behind)
@@ -80,8 +85,9 @@ def hero_preflop_spot(hand):
         hero_action = h.verb
     return Spot(
         tid=hand.tid, hand_id=hand.hand_id, n_players=len(hand.players),
-        position=pos.get("Hero", "?"), hero_bb=hero_stack / hand.bb, eff_bb=eff / hand.bb,
-        facing=facing, covers=covers, hero_action=hero_action, cards=hand.hero_cards,
+        position=pos.get(name, "?"), hero_bb=hero_stack / hand.bb, eff_bb=eff / hand.bb,
+        facing=facing, covers=covers, hero_action=hero_action,
+        cards=hand.hero_cards if name == "Hero" else " ".join(hand.shown_cards().get(name, [])),
     )
 
 

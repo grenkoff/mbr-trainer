@@ -20,9 +20,9 @@ from psycopg.types.json import Jsonb
 from mbr import db, library
 from mbr.hh import parse_hand
 from mbr.pushfold import MEAN_BOUNTY_BI, Table, table_from_hand
-from mbr.ranges import class_label, class_of_cards
+from mbr.ranges import class_label, class_of_cards, combo_counts
 from mbr.showdown import rankings, split_pots
-from mbr.spots import PLACE_PRIZE_BI, hero_preflop_spot, stack_bucket
+from mbr.spots import PLACE_PRIZE_BI, preflop_spot, stack_bucket
 from mbr.temperature import cool_down
 
 VERSION = 1  # bump when what is computed changes: older results are then computed again
@@ -176,55 +176,69 @@ PREFLOP_KEYS = ("hands", "vpip", "pfr", "rfi_opp", "rfi", "open_shove", "limp", 
                 "vs_shove_opp", "vs_shove_call")
 
 
-def preflop(hands):
-    """Hero's preflop counts by (stage, position, stack bucket of his stack in bb):
-    hands dealt; VPIP, PFR; folded to him (rfi_opp): raised first in (rfi), of which all-in (open_shove), or
-    limped; facing one raise (threebet_opp): re-raised; facing one shove (vs_shove_opp): called or re-shoved."""
+def preflop(hands, opponents=False):
+    """Hero's preflop counts (or, if opponents, everybody else's together) by (stage, position, stack bucket of
+    the player's stack in bb): hands dealt; VPIP, PFR; folded to him (rfi_opp): raised first in (rfi), of which
+    all-in (open_shove), or limped; facing one raise (threebet_opp): re-raised; facing one shove (vs_shove_opp):
+    called or re-shoved."""
     out = {}
     for hand in hands:
-        if "Hero" not in hand.stacks:
-            continue
         stage = "ft" if hand.is_final_stage else "rush"
-        spot = hero_preflop_spot(hand)
-        position = hand.positions().get("Hero", "?")
-        c = out.setdefault((stage, position, stack_bucket(hand.stacks["Hero"] / hand.bb)), Counter())
-        c["hands"] += 1
-        mine = [a for a in hand.actions if a.street == "PRE" and a.name == "Hero" and a.verb in BETTING]
-        c["vpip"] += any(a.verb in ("call", "raise", "bet") for a in mine)
-        c["pfr"] += any(a.verb in ("raise", "bet") for a in mine)
-        if spot is None:  # all-in from posting
-            continue
-        if spot.facing == "unopened" and position != "BB":
-            c["rfi_opp"] += 1
-            c["rfi"] += spot.hero_action in ("raise", "allin")
-            c["open_shove"] += spot.hero_action == "allin"
-            c["limp"] += spot.hero_action == "limp"
-        elif spot.facing == "raise":
-            c["threebet_opp"] += 1
-            c["threebet"] += spot.hero_action in ("raise", "allin")
-        elif spot.facing == "allin":
-            c["vs_shove_opp"] += 1
-            c["vs_shove_call"] += spot.hero_action in ("call", "allin")
+        positions = hand.positions()
+        names = [n for n in hand.players if n != "Hero"] if opponents else ["Hero"]
+        for name in names:
+            if name not in hand.stacks:
+                continue
+            position = positions.get(name, "?")
+            c = out.setdefault((stage, position, stack_bucket(hand.stacks[name] / hand.bb)), Counter())
+            _count_preflop(hand, name, position, c)
     return [[*key, {k: c[k] for k in PREFLOP_KEYS}] for key, c in out.items()]
+
+
+def _count_preflop(hand, name, position, c):
+    spot = preflop_spot(hand, name)
+    c["hands"] += 1
+    mine = [a for a in hand.actions if a.street == "PRE" and a.name == name and a.verb in BETTING]
+    c["vpip"] += any(a.verb in ("call", "raise", "bet") for a in mine)
+    c["pfr"] += any(a.verb in ("raise", "bet") for a in mine)
+    if spot is None:  # all-in from posting
+        return
+    if spot.facing == "unopened" and position != "BB":
+        c["rfi_opp"] += 1
+        c["rfi"] += spot.hero_action in ("raise", "allin")
+        c["open_shove"] += spot.hero_action == "allin"
+        c["limp"] += spot.hero_action == "limp"
+    elif spot.facing == "raise":
+        c["threebet_opp"] += 1
+        c["threebet"] += spot.hero_action in ("raise", "allin")
+    elif spot.facing == "allin":
+        c["vs_shove_opp"] += 1
+        c["vs_shove_call"] += spot.hero_action in ("call", "allin")
 
 
 MAX_EFF_BB = 20  # deeper decisions are not push/fold
 
 
-def decision(hand, setups, with_range=False):
-    """Hero's final-table push/fold decision scored against the HRC library, or None: open shove or fold, call
-    or fold facing a lone shove, overcall or fold facing a shove and a call. With overcalls up to
+def decision(hand, setups, with_range=False, name="Hero", solvers=None, others=False):
+    """A player's final-table push/fold decision scored against the HRC library, or None: open shove or fold,
+    call or fold facing a lone shove, overcall or fold facing a shove and a call. With overcalls up to
     OVERCALLS_MAX_PLAYERS, without them beyond. Limps and smaller raises are not scored.
+    Hero's needs his cards; another player's is scored by his hand only when it was shown, and has range_pct
+    (how much of the hands HRC plays there) either way. `solvers` caches the loaded solutions between players.
+    With others, a limp or a raise short of all-in where the push/fold model has a decision comes as action "other",
+    unscored.
     with_range adds HRC's frequency of playing and EV of playing less folding for each of the 169 hands, and the
-    line: the preflop seats of Hero, the shover and the caller before him."""
+    line: the preflop seats of the player, the shover and the caller before him."""
     setup = setups.get(hand.hand_id)
-    spot = hero_preflop_spot(hand)
-    if setup is None or setup["forced"] or spot is None or spot.eff_bb > MAX_EFF_BB or not hand.hero_cards:
+    spot = preflop_spot(hand, name)
+    hero = name == "Hero"
+    if (setup is None or setup["forced"] or spot is None or spot.eff_bb > MAX_EFF_BB
+            or hero and not hand.hero_cards):
         return None
     pre = [a for a in hand.actions if a.street == "PRE" and a.verb not in ("ante", "sb", "bb", "show")]
-    before = [a for a in pre[:next(i for i, a in enumerate(pre) if a.name == "Hero")] if a.verb != "fold"]
+    before = [a for a in pre[:next(i for i, a in enumerate(pre) if a.name == name)] if a.verb != "fold"]
     names = table_from_hand(hand).names  # preflop order, as the set-up's stacks and the solver's players
-    h = names.index("Hero")
+    h = names.index(name)
     if spot.facing == "unopened":
         kind, key = "open", ("push", h)
     elif spot.facing == "allin" and len(before) == 1 and before[0].verb in ("raise", "bet"):
@@ -234,29 +248,37 @@ def decision(hand, setups, with_range=False):
         kind, key = "overcall", ("over", names.index(before[0].name), names.index(before[1].name), h)
     else:
         return None
+    action = {"allin": "play", "call": "play", "fold": "fold"}.get(spot.hero_action, "other")
     overcalls = len(names) <= library.OVERCALLS_MAX_PLAYERS
     if kind == "overcall" and not overcalls or library.variant("hrc", overcalls) not in setup["solved"]:
         return None
-    solver = library.load(setup, "hrc", overcalls)
+    if action == "other":
+        return {"hand_id": hand.hand_id, "kind": kind, "players": len(names), "position": spot.position,
+                "eff_bb": round(spot.eff_bb, 1), "bucket": stack_bucket(spot.eff_bb), "action": action,
+                "overcalls": overcalls} if others else None
+    solvers = {} if solvers is None else solvers
+    if (hand.hand_id, overcalls) not in solvers:
+        solvers[hand.hand_id, overcalls] = library.load(setup, "hrc", overcalls)
+    solver = solvers[hand.hand_id, overcalls]
     if key not in solver.ev:
         return None
-    cls = class_of_cards(hand.hero_cards)
-    ev_play, ev_fold = float(solver.ev[key][0][cls]), float(solver.ev[key][1])
-    target = {"push": solver.push, "call": solver.call, "over": solver.over}[key[0]]
-    freq = float(target[key[1] if key[0] == "push" else key[1:]][cls])
-    action = {"allin": "play", "call": "play", "fold": "fold"}.get(spot.hero_action, "other")
-    if action == "other":
-        return None
-    best = "play" if ev_play > ev_fold else "fold"
+    play = {"push": solver.push, "call": solver.call, "over": solver.over}[key[0]][
+        key[1] if key[0] == "push" else key[1:]]
+    cc = combo_counts()
     out = {"hand_id": hand.hand_id, "kind": kind, "players": len(names), "position": spot.position,
-           "eff_bb": round(spot.eff_bb, 1), "bucket": stack_bucket(spot.eff_bb), "cards": hand.hero_cards,
-           "class": class_label(cls), "action": action, "best": best, "freq": round(freq, 3),
-           "ev_play": round(ev_play, 4), "ev_fold": round(ev_fold, 4),
-           "loss": round(abs(ev_play - ev_fold), 4) if action != best else 0.0, "overcalls": overcalls}
+           "eff_bb": round(spot.eff_bb, 1), "bucket": stack_bucket(spot.eff_bb), "action": action,
+           "overcalls": overcalls, "range_pct": round(float(play @ cc / cc.sum() * 100), 2)}
+    if spot.cards:
+        cls = class_of_cards(spot.cards)
+        ev_play, ev_fold = float(solver.ev[key][0][cls]), float(solver.ev[key][1])
+        best = "play" if ev_play > ev_fold else "fold"
+        out.update(cards=spot.cards, **{"class": class_label(cls)}, best=best, freq=round(float(play[cls]), 3),
+                   ev_play=round(ev_play, 4), ev_fold=round(ev_fold, 4),
+                   loss=round(abs(ev_play - ev_fold), 4) if action != best else 0.0)
+        if with_range:
+            out["range"] = {"hand_class": cls, "freq": [round(float(f), 3) for f in play],
+                            "ev_diff": [round(float(e) - ev_fold, 4) for e in solver.ev[key][0]]}
     if with_range:
-        play = target[key[1] if key[0] == "push" else key[1:]]
-        out["range"] = {"hand_class": cls, "freq": [round(float(f), 3) for f in play],
-                        "ev_diff": [round(float(e) - ev_fold, 4) for e in solver.ev[key][0]]}
         out["line"] = {"hero": h, "shover": key[1] if kind != "open" else None,
                        "caller": key[2] if kind == "overcall" else None}
     return out
@@ -336,15 +358,18 @@ def load():
 
 class Worker:
     """Keeps the results current in the background: after uploads and newly solved set-ups (which drop the results
-    of their tournaments), one tournament at a time, cooling down the CPU between them."""
+    of their tournaments), one tournament at a time, cooling down the CPU between them; Hero's first, then the
+    opponents' (mbr.opponents)."""
 
     def __init__(self):
         import threading
 
+        from mbr import opponents  # it builds on this module
+
         self.stop = threading.Event()
         self.wake = threading.Event()
         self.cooling = False
-        self.left, self.total = len(pending()), total()
+        self.left, self.total, self.opponents_left = len(pending()), total(), len(opponents.pending())
         threading.Thread(target=self._loop, daemon=True).start()
 
     def notify(self):
@@ -356,22 +381,27 @@ class Worker:
     def _loop(self):
         import traceback
 
+        from mbr import opponents
+
         while not self.stop.is_set():
             try:
-                ids = pending()
-                self.left, self.total = len(ids), total()
-                if not ids:
+                ids, theirs = pending(), opponents.pending()
+                self.left, self.total, self.opponents_left = len(ids), total(), len(theirs)
+                if ids:
+                    update(ids[:1], log=self._log, stop=self.stop)
+                elif theirs:
+                    opponents.update(theirs[:1], log=self._log, stop=self.stop)
+                else:
                     self.wake.wait(10)
                     self.wake.clear()
                     continue
-                update(ids[:1], log=self._log, stop=self.stop)
                 self.cooling = False
             except Exception:
                 traceback.print_exc()
                 self.stop.wait(30)
 
     def status(self):
-        return {"left": self.left, "total": self.total, "cooling": self.cooling}
+        return {"left": self.left, "total": self.total, "opponents_left": self.opponents_left, "cooling": self.cooling}
 
     def shutdown(self):
         self.stop.set()

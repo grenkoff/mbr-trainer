@@ -89,6 +89,11 @@ function resultsProgress(r) {
     r.left ? (r.cooling ? "Пауза: процессор остывает." : "Считается в фоне, статистика дополняется по ходу.") : "");
 }
 
+function opponentsProgress(r) {
+  return progressBar("Средний оппонент: турниров посчитано", r.total - r.opponents_left, r.total,
+    r.opponents_left ? (r.left ? "Начнётся после твоих результатов." : r.cooling ? "Пауза: процессор остывает." : "Считается в фоне.") : "");
+}
+
 async function refreshUploads() {
   let info;
   try { info = await (await fetch("/api/uploads")).json(); } catch (e) { return; }
@@ -98,7 +103,7 @@ async function refreshUploads() {
     <span>Раздач</span><b>${fmtInt(t.hands)}</b><span>Сетапов финального стола</span><b>${fmtInt(t.setups)}</b>
     <span>Период</span><b>${fmtDate(t.first)} — ${fmtDate(t.last)}</b></div>`;
   renderQueue(info.queue);
-  uploadEl("resultsStatus").innerHTML = resultsProgress(info.results);
+  uploadEl("resultsStatus").innerHTML = resultsProgress(info.results) + opponentsProgress(info.results);
   uploadEl("uploadsTable").innerHTML = info.uploads.length
     ? `<tr><th>Файл</th><th>Загружен</th><th>Новых раздач</th><th>Сводок</th></tr>` + info.uploads.map((u) =>
       `<tr><td>${escapeHtml(u.name)}</td><td>${fmtDate(u.uploaded_at)}</td><td>${fmtInt(u.hands)}</td><td>${fmtInt(u.summaries)}</td></tr>`).join("")

@@ -45,6 +45,7 @@ def import_file(name, data):
                      (name, sha, out["hands"], out["summaries"]))
         # their results are computed again with the new hands or summary
         conn.execute("DELETE FROM tournament_results WHERE tournament_id = ANY(%s)", (list(touched),))
+        conn.execute("DELETE FROM opponent_results WHERE tournament_id = ANY(%s)", (list(touched),))
     return out
 
 

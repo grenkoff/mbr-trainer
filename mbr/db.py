@@ -83,6 +83,12 @@ CREATE TABLE IF NOT EXISTS tournament_results (
     version int NOT NULL,
     data jsonb NOT NULL
 );
+-- the same for the opponents' play (mbr.opponents)
+CREATE TABLE IF NOT EXISTS opponent_results (
+    tournament_id text PRIMARY KEY REFERENCES tournaments,
+    version int NOT NULL,
+    data jsonb NOT NULL
+);
 """
 
 

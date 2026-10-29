@@ -1,7 +1,7 @@
 "use strict";
 
 // tabs by the URL hash: each tab's script listens for "tabshown" with its name
-const TABS = ["upload", "stats", "mistakes", "trainer"];
+const TABS = ["upload", "stats", "mistakes", "opponents", "trainer"];
 
 function showTab() {
   // "#trainer/<hand id>" opens that hand in the trainer
