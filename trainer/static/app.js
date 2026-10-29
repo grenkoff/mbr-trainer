@@ -321,6 +321,29 @@ async function nextSpot() {
   }
 }
 
+/** Show the spot of Hero's decision in a hand from the history, as it was dealt. */
+async function openHand(handId) {
+  window.history.replaceState(null, "", "#trainer"); // a reload deals as usual (history is the session's answers)
+  $("loading").classList.remove("hidden");
+  $("loadingHint").textContent = "";
+  const seq = ++spotSeq; // a spot still on its way is not shown over this one
+  try {
+    const res = await fetch(`/api/hand_spot?id=${encodeURIComponent(handId)}`);
+    const spot = await res.json();
+    if (!res.ok) throw new Error(spot.error || res.statusText);
+    if (seq === spotSeq) showSpot(spot, null);
+  } catch (e) {
+    if (seq === spotSeq) $("question").innerHTML = `<span style="color:var(--bad)">Ошибка: ${e.message}</span>`;
+  } finally {
+    if (seq === spotSeq) $("loading").classList.add("hidden");
+  }
+}
+
+const handInHash = () => {
+  const m = location.hash.match(/^#trainer\/(.+)$/);
+  return m ? decodeURIComponent(m[1]) : null;
+};
+
 /* ---------------- table rendering ---------------- */
 
 function fmtBB(x) { return (Math.round(x * 10) / 10).toString(); }
@@ -418,7 +441,14 @@ function renderTable(spot) {
 
 // the table shows what happened; the buttons are always fold and shove (calling an all-in is a shove too)
 function renderQuestion() {
-  $("question").innerHTML = "";
+  const src = current && current.source;
+  if (!src || !src.review) {
+    $("question").innerHTML = "";
+    return;
+  }
+  const played = src.hero_action === "fold" ? "фолд" : current.kind === "open" ? "пуш" : "колл";
+  $("question").innerHTML = `<span class="review-note">Раздача ${src.hand_id} из истории${answered ? `: в игре вы сыграли ${played}` : ""}.
+    Ответ не идёт в статистику и рейтинг.</span>`;
 }
 
 /* ---------------- rating ---------------- */
@@ -489,16 +519,21 @@ function answer(choice) {
   // decisions too close to call do not move the rating either way
   const players = current.seats.length;
   const before = currentRating(players);
-  const delta = gap < CLOSE_EV ? 0 : ratingChange(before, ratedRows(stats, players).length, gap, choice === best);
+  // a hand from the history opened to review it is not a fresh spot: it counts for nothing
+  const review = !!(current.source && current.source.review);
+  const delta = review ? null
+    : gap < CLOSE_EV ? 0 : ratingChange(before, ratedRows(stats, players).length, gap, choice === best);
   answered = { choice, correct, cost, delta };
-  const record = {
-    ts: Date.now(), kind: current.kind, players,
-    position: current.seats[current.hero].position, difficulty: current.settings.difficulty,
-    model: current.settings.model, overcalls: !!current.settings.overcalls, stacks: current.settings.stacks || "random",
-    hand: current.hand, correct, cost, gap, rating: before + delta,
-  };
-  stats.push(record);
-  postAnswers(record);
+  if (!review) {
+    const record = {
+      ts: Date.now(), kind: current.kind, players,
+      position: current.seats[current.hero].position, difficulty: current.settings.difficulty,
+      model: current.settings.model, overcalls: !!current.settings.overcalls, stacks: current.settings.stacks || "random",
+      hand: current.hand, correct, cost, gap, rating: before + delta,
+    };
+    stats.push(record);
+    postAnswers(record);
+  }
   history.unshift({ spot: current, ...answered });
   showSpot(current, answered);
   renderHistory();
@@ -598,8 +633,9 @@ function renderStats() {
     return `<div class="stat-group"><div class="title">${title}</div>` +
       rows.map(([label, s]) => row(label, s)).join("") + `</div>`;
   };
-  const sess = summarize(history);
-  const sessHands = history.filter((h) => h.spot.seats.length === players);
+  const dealt = history.filter((h) => !(h.spot.source && h.spot.source.review)); // hands reviewed count for nothing
+  const sess = summarize(dealt);
+  const sessHands = dealt.filter((h) => h.spot.seats.length === players);
   const sessDelta = sessHands.reduce((s, h) => s + (h.delta || 0), 0);
   const peak = rated.length >= RATING_PROVISIONAL
     ? Math.round(Math.max(...rated.slice(RATING_PROVISIONAL - 1).map((r) => r.rating))) : null;
@@ -735,7 +771,8 @@ async function init() {
   setupSettings();
   rerate();
   renderStats();
-  nextSpot();
+  const hand = handInHash();
+  if (hand) openHand(hand); else nextSpot();
 }
 
 // the trainer starts when its tab is first shown; later the library may have grown from uploads
@@ -746,6 +783,8 @@ document.addEventListener("tabshown", async (e) => {
     started = true;
     init();
   } else {
+    const hand = handInHash();
+    if (hand) openHand(hand);
     await loadInfo();
     refreshSettingsUI(); // the counts of hands solved
   }

@@ -254,9 +254,22 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
     else:
         return None
     shover, caller, ev_play, ev_fold, ev_diff, freq, cls = found
-    acted = order[:order.index(hero_idx)]  # the seats that act before Hero
     shover, caller = (None if x is None else order[x] for x in (shover, caller))
+    settings = {"players": n, "position": position, "kind": kind, "bb_min": bb_min, "bb_max": bb_max,
+                "difficulty": difficulty, "model": model, "overcalls": overcalls, "stacks": stacks_source,
+                "forced": forced}
+    return _package(settings, source, (level, sb, bb, ante), stacks, order, hero_idx, kind, shover, caller,
+                    is_forced, ev_diff, ev_fold, freq, cls, pick_cards(cls, rng))
 
+
+def _package(settings, source, blinds, stacks, order, hero_idx, kind, shover, caller, is_forced, ev_diff, ev_fold,
+             freq, cls, cards):
+    """The spot as the trainer's page shows it, with the answer; seats in preflop order, `order` holding them
+    in the solver's order, ev_diff and freq for each of the 169 hands."""
+    level, sb, bb, ante = blinds
+    pos = positions(len(stacks))
+    ev_diff, freq = np.asarray(ev_diff, dtype=float), np.asarray(freq, dtype=float)
+    acted = order[:order.index(hero_idx)]  # the seats that act before Hero
     seats = []
     for i, p in enumerate(pos):
         seats.append({
@@ -278,9 +291,7 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
         else:
             actions.append({"seat": i, "position": pos[i], "action": "fold"})
     return {
-        "settings": {"players": n, "position": position, "kind": kind, "bb_min": bb_min, "bb_max": bb_max,
-                     "difficulty": difficulty, "model": model, "overcalls": overcalls, "stacks": stacks_source,
-                     "forced": forced},
+        "settings": settings,
         "source": source,
         "level": level, "sb": sb, "bb": bb, "ante": ante,
         "seats": seats,
@@ -289,11 +300,11 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
         "shover": shover,
         "caller": caller,
         "actions": actions,
-        "cards": pick_cards(cls, rng),
+        "cards": cards,
         "hand": class_label(cls),
         "answer": {
             "hand_class": cls,
-            "ev_play": float(ev_play[cls]),
+            "ev_play": float(ev_diff[cls] + ev_fold),
             "ev_fold": float(ev_fold),
             "ev_diff": [round(float(x), 4) for x in ev_diff],
             "freq": [round(float(x), 3) for x in freq],
@@ -302,3 +313,26 @@ def _make_spot(rng, players, position, kind, bb_min, bb_max, difficulty, model, 
             "range_pct": float(freq @ combo_counts() / combo_counts().sum() * 100),
         },
     }
+
+
+def hand_spot(hand_id):
+    """The spot of Hero's push/fold decision in an uploaded final-table hand as it was dealt: his cards and the
+    line before him, with HRC's answer (mbr.results.decision). Raises ValueError if there is none."""
+    from mbr import results
+
+    detail = results.hand_detail(hand_id)
+    if detail is None:
+        raise ValueError(f"hand {hand_id} is not uploaded")
+    d, setup = detail["decision"], detail["setup"]
+    if d is None:
+        raise ValueError(f"hand {hand_id} has no push/fold decision of Hero scored by HRC")
+    line, stacks = d["line"], list(setup["stacks"])
+    hero = line["hero"]
+    settings = {"players": len(stacks), "position": positions(len(stacks))[hero], "kind": d["kind"],
+                "bb_min": None, "bb_max": None, "difficulty": "history", "model": "hrc", "overcalls": d["overcalls"],
+                "stacks": "history", "forced": False}
+    source = {"stacks": "history", "hand_id": hand_id, "review": True, "hero_action": d["action"]}
+    return _package(settings, source, (setup["level"], setup["sb"], setup["bb"], setup["ante"]), stacks,
+                    list(range(len(stacks))), hero, d["kind"], line["shover"], line["caller"], False,
+                    d["range"]["ev_diff"], d["ev_fold"], d["range"]["freq"], d["range"]["hand_class"],
+                    d["cards"].split())

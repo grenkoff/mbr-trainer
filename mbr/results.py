@@ -215,7 +215,8 @@ def decision(hand, setups, with_range=False):
     """Hero's final-table push/fold decision scored against the HRC library, or None: open shove or fold, call
     or fold facing a lone shove, overcall or fold facing a shove and a call. With overcalls up to
     OVERCALLS_MAX_PLAYERS, without them beyond. Limps and smaller raises are not scored.
-    with_range adds HRC's frequency of playing and EV of playing less folding for each of the 169 hands."""
+    with_range adds HRC's frequency of playing and EV of playing less folding for each of the 169 hands, and the
+    line: the preflop seats of Hero, the shover and the caller before him."""
     setup = setups.get(hand.hand_id)
     spot = hero_preflop_spot(hand)
     if setup is None or setup["forced"] or spot is None or spot.eff_bb > MAX_EFF_BB or not hand.hero_cards:
@@ -256,6 +257,8 @@ def decision(hand, setups, with_range=False):
         play = target[key[1] if key[0] == "push" else key[1:]]
         out["range"] = {"hand_class": cls, "freq": [round(float(f), 3) for f in play],
                         "ev_diff": [round(float(e) - ev_fold, 4) for e in solver.ev[key][0]]}
+        out["line"] = {"hero": h, "shover": key[1] if kind != "open" else None,
+                       "caller": key[2] if kind == "overcall" else None}
     return out
 
 
@@ -313,14 +316,15 @@ def update(tournament_ids, log=None, stop=None):
 
 
 def hand_detail(hand_id):
-    """A hand's history text and Hero's scored decision in it with HRC's range, or None if it is not uploaded."""
+    """A hand's history text, its final-table set-up and Hero's scored decision in it with HRC's range, or None if
+    it is not uploaded."""
     with db.connect() as conn:
         row = conn.execute("SELECT raw, tournament_id FROM hands WHERE id = %s", (hand_id,)).fetchone()
         if row is None:
             return None
-        hand = parse_hand(row["raw"])
-        return {"hand_id": hand_id, "tid": row["tournament_id"], "text": row["raw"],
-                "decision": decision(hand, setups_for(conn, [row["tournament_id"]]), with_range=True)}
+        setups = setups_for(conn, [row["tournament_id"]])
+        return {"hand_id": hand_id, "tid": row["tournament_id"], "text": row["raw"], "setup": setups.get(hand_id),
+                "decision": decision(parse_hand(row["raw"]), setups, with_range=True)}
 
 
 def load():

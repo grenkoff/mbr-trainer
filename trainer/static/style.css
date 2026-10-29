@@ -312,3 +312,5 @@ kbd {
 @media (max-width: 700px) { .hand-view { grid-template-columns: minmax(0, 1fr); } }
 .data.decisions th, .data.decisions td { text-align: left; }
 .data.decisions :is(th, td):is(:nth-child(3), :nth-child(5), :nth-child(10)) { text-align: right; }
+.hand-side .btn { align-self: start; text-decoration: none; }
+.review-note { color: var(--muted); font-size: 13px; }

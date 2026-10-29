@@ -134,6 +134,7 @@ function renderHand(td, hand) {
         <span>HRC ${play}</span><span>${Math.round(100 * d.freq)}%</span>
       </div>
       <p class="hint">${d.overcalls ? "Модель с оверколлами" : "Модель без оверколлов"}. Турнир ${esc(hand.tid)}.</p>
+      <a class="btn small" href="#trainer/${encodeURIComponent(hand.hand_id)}">Открыть в тренажёре</a>
     </div>
     <div>
       <div class="grid-head"><div class="grid-title">Диапазон HRC: <b>${KIND_LABEL[d.kind].toLowerCase()}</b></div>

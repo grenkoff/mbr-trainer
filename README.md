@@ -44,7 +44,8 @@ Four tabs:
   the database; new uploads and newly solved set-ups bring their tournaments up to date.
 - **Mistakes**: the uploaded final-table hands where Hero's push/fold decision differs from HRC's (or all of them),
   by player count, decision and position, costliest or newest first. A hand opens with its history, the EV of
-  playing and folding and HRC's range for the decision, Hero's hand marked.
+  playing and folding and HRC's range for the decision, Hero's hand marked, and opens in the trainer as it was
+  dealt (`#trainer/<hand id>`); answers there count neither in the statistics nor in the rating.
 - **Trainer**, below.
 
 All of it lives in PostgreSQL (`mbr/db.py`): the hands and summaries, the final-table set-ups, the solver library,

@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from psycopg.types.json import Jsonb
 
-from mbr import db, equity3, importer, library, real_stacks, results, stats
+from mbr import db, equity3, importer, library, real_stacks, results, stats, trainer
 from mbr import solve_queue
 from mbr.solve_queue import SolveQueue
 from trainer.pool import SpotPool
@@ -139,6 +139,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "no such hand"})
             else:
                 self._json(200, detail)
+            return
+        if url.path == "/api/hand_spot":
+            try:
+                self._json(200, trainer.hand_spot(parse_qs(url.query).get("id", [""])[0]))
+            except ValueError as e:
+                self._json(404, {"error": str(e)})
             return
         if url.path == "/api/answers":
             with db.connect() as conn:
