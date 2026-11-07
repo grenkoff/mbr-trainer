@@ -1,0 +1,95 @@
+# Ganzfried & Sandholm (AAMAS 2008), tables 11-16: jam/fold equilibrium of a single hand of a cash game,
+# 3 players with 4500 chips each, blinds 300/600, no ante, chip EV.
+# Rows and columns are ranks A..2; suited hands above the diagonal, offsuit below.
+# Entries: P = always jam/call, F = never, a number = jam/call probability in percent.
+# Source: https://aamas.csc.liv.ac.uk/Proceedings/aamas08/proceedings/pdf/paper/AAMAS08_0313.pdf (page 926)
+
+table 11: Button
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P  P  P 98  F
+ P  P  P  P  P  P  P 96 94  F  F  F  F
+ P  P  P  P  P  P 98 95  F  F  F  F  F
+ P  P  P  P  P  P 98 96  F  F  F  F  F
+ P  P  F  F 20  P 99 97  F  F  F  F  F
+ P  2  F  F  F  F  P 98 95  F  F  F  F
+ P  F  F  F  F  F  F  P 97  F  F  F  F
+ P  F  F  F  F  F  F  F  P 94  F  F  F
+ P  F  F  F  F  F  F  F  F  P  F  F  F
+ P  F  F  F  F  F  F  F  F  F  P  F  F
+ P  F  F  F  F  F  F  F  F  F  F  P  F
+ P  F  F  F  F  F  F  F  F  F  F  F  P
+
+table 12: Small blind after button jams
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  1  1  1  F  F  F  F
+ P  P  P  P  P  1  F  F  F  F  F  F  F
+ P  P 91  P  P  1  F  F  F  F  F  F  F
+ P  P  1  F  P  1  F  F  F  F  F  F  F
+ P  1  F  F  F  P  F  F  F  F  F  F  F
+ P  F  F  F  F  F  P  F  F  F  F  F  F
+ P  F  F  F  F  F  F  P  F  F  F  F  F
+ P  F  F  F  F  F  F  F  P  F  F  F  F
+ P  F  F  F  F  F  F  F  F  P  F  F  F
+ 1  F  F  F  F  F  F  F  F  F  P  F  F
+ 1  F  F  F  F  F  F  F  F  F  F  P  F
+ 1  F  F  F  F  F  F  F  F  F  F  F  P
+
+table 13: Small blind after button folds
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P  P 99 99 99
+ P  P  P  P  P  P  P  P 99 99 99 17  F
+ P  P  P  P  P  P  P  P 99 99  F  F  F
+ P  P  P  P  P 99  P  P 99 99 98  F  F
+ P  P  P  P 99 99 99  P 99 99 98  F  F
+ P  P  P  F  F  F  8 98  P 99 99 11  F
+ P  P  P  F  F  F  F  F  F  P 99 98  F
+ P  P  P  F  F  F  F  F  F  F  P 98  F
+ P  P  4  F  F  F  F  F  F  F  F  P  F
+ P  P  F  F  F  F  F  F  F  F  F  F  P
+
+table 14: Big blind after jam/fold
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P 92  1  1  1
+ P  P  P  P  P  P 89  1  1  P  F  F  F
+ P  P  P  P  P 95  1  F  F  F  F  F  F
+ P  P  P 48  P 95  1  F  F  F  F  F  F
+ P  P  1  F  F  P  F  F  F  F  F  F  F
+ P  1  F  F  F  F  P  F  F  F  F  F  F
+ P  1  F  F  F  F  F  P  F  F  F  F  F
+ P  1  F  F  F  F  F  F  P  F  F  F  F
+ P  1  F  F  F  F  F  F  F  P  F  F  F
+ P  F  F  F  F  F  F  F  F  F  P  F  F
+ P  F  F  F  F  F  F  F  F  F  F  P  F
+ P  F  F  F  F  F  F  F  F  F  F  F  P
+
+table 15: Big blind after fold/jam
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P  P  P  P  P
+ P  P  P  P  P  P  P  P  P  P 99 96  1
+ P  P  P  P  P  P  P 98  1  F  F  F  F
+ P  P  P  P  P  P  P  5  F  F  F  F  F
+ P  P  P  P 97  P 99  1  F  F  F  F  F
+ P  P  P 93  F  F  P  F  F  F  F  F  F
+ P  P 97  F  F  F  F  P  F  F  F  F  F
+ P  P  1  F  F  F  F  F  P  F  F  F  F
+ P  P  F  F  F  F  F  F  F  P  F  F  F
+ P  P  F  F  F  F  F  F  F  F  P  F  F
+ P  P  F  F  F  F  F  F  F  F  F  P  F
+ P 99  F  F  F  F  F  F  F  F  F  F  P
+
+table 16: Big blind after jam/jam
+ P  P  P  P  P  P  P  P  P  P  5  3  2
+ P  P  P  P  P  P  2  1  1  1  F  F  F
+ P  P  P  P  P  P  2  F  F  F  F  F  F
+ P  P  P  P  P  P  3  F  F  F  F  F  F
+ P  8  2  2  P  P  P  F  F  F  F  F  F
+ P  1  F  F  F  P  P  2  F  F  F  F  F
+ 4  F  F  F  F  F  P  P  F  F  F  F  F
+ 2  F  F  F  F  F  F  P  7  F  F  F  F
+ 1  F  F  F  F  F  F  F  P  F  F  F  F
+ 1  F  F  F  F  F  F  F  F  P  F  F  F
+ 1  F  F  F  F  F  F  F  F  F  P  F  F
+ 1  F  F  F  F  F  F  F  F  F  F  P  F
+ F  F  F  F  F  F  F  F  F  F  F  F  2

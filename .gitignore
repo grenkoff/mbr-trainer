@@ -1,0 +1,7 @@
+hh/
+*.zip
+__pycache__/
+*.pyc
+.venv/
+build/
+rust/target/

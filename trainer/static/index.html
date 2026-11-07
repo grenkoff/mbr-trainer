@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MBR: история и тренажёр</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Mystery Battle Royale</div>
+  <nav class="tabs" id="tabs">
+    <a href="#upload" data-tab="upload">Загрузка</a>
+    <a href="#stats" data-tab="stats">Статистика</a>
+    <a href="#mistakes" data-tab="mistakes">Ошибки</a>
+    <a href="#opponents" data-tab="opponents">Оппоненты</a>
+    <a href="#trainer" data-tab="trainer">Тренажёр</a>
+  </nav>
+  <div class="stats-inline" id="statsInline"></div>
+</header>
+
+<div class="tab page" id="tab-upload">
+  <section class="panel">
+    <h2>Загрузка истории</h2>
+    <div class="dropzone" id="dropzone">
+      <p>Перетащи сюда файлы истории раздач и сводки турниров GG (.txt или .zip)</p>
+      <div class="buttons">
+        <label class="btn small">Выбрать файлы<input type="file" id="pickFiles" multiple accept=".txt,.zip" hidden></label>
+        <label class="btn small">Выбрать папку<input type="file" id="pickFolder" webkitdirectory hidden></label>
+      </div>
+      <p class="hint">Уже загруженные раздачи и сводки пропускаются, так что можно загружать папку целиком снова.</p>
+    </div>
+    <ul class="upload-log" id="uploadLog"></ul>
+  </section>
+  <section class="panel">
+    <h2>В базе</h2>
+    <div id="dbTotals"></div>
+    <h2>Расчёт решений HRC</h2>
+    <p class="hint">Новые сетапы финального стола решаются в фоне: 2–5 игроков с оверколлами и без, 6–9 без.
+      Пока процессор горячее порога, расчёт стоит на паузе.</p>
+    <div id="queueStatus"></div>
+    <h2>Результаты для статистики</h2>
+    <div id="resultsStatus"></div>
+  </section>
+  <section class="panel">
+    <h2>Последние загрузки</h2>
+    <div class="table-scroll"><table class="data" id="uploadsTable"></table></div>
+  </section>
+</div>
+
+<div class="tab page" id="tab-stats">
+  <div id="statsPage"><p class="hint">Загрузка…</p></div>
+</div>
+
+<div class="tab page" id="tab-mistakes">
+  <div id="mistakesPage"><p class="hint">Загрузка…</p></div>
+</div>
+
+<div class="tab page" id="tab-opponents">
+  <div id="opponentsPage"><p class="hint">Загрузка…</p></div>
+</div>
+
+<div class="tab layout" id="tab-trainer">
+  <aside class="panel settings">
+    <h2>Настройки</h2>
+
+    <label class="field-label">Игроков за столом</label>
+    <div class="seg" id="setPlayers">
+      <button data-v="2">2</button><button data-v="3">3</button><button data-v="4">4</button><button data-v="5">5</button>
+      <button data-v="6">6</button><button data-v="7">7</button>
+      <button data-v="8">8</button><button data-v="9">9</button>
+    </div>
+    <p class="hint" id="playersHint">Можно выбрать несколько, каждая раздача возьмёт одно из них.</p>
+
+    <label class="field-label">Позиция</label>
+    <div class="seg wrap" id="setPosition"></div>
+
+    <label class="field-label">Решение</label>
+    <div class="seg" id="setKind">
+      <button data-v="any">Любое</button><button data-v="open">Опен-пуш</button><button data-v="call">Колл пуша</button>
+    </div>
+    <div class="seg" id="setKind2">
+      <button data-v="overcall">Оверколл (пуш + колл)</button>
+    </div>
+
+    <label class="field-label">Стек героя, bb</label>
+    <div class="seg wrap" id="setStackPreset">
+      <button data-v="1-5">1–5</button><button data-v="5-10">5–10</button><button data-v="10-15">10–15</button>
+      <button data-v="15-20">15–20</button><button data-v="20-30">20–30</button><button data-v="3-20">3–20</button>
+    </div>
+    <div class="range-inputs">
+      <input type="number" id="bbMin" min="1" max="60" step="0.5"> —
+      <input type="number" id="bbMax" min="1" max="60" step="0.5">
+    </div>
+
+    <label class="field-label">Стеки за столом</label>
+    <div class="seg" id="setStacks">
+      <button data-v="random">Случайные</button><button data-v="history">Из истории</button>
+    </div>
+    <p class="hint" id="stacksHint"></p>
+    <label class="toggle" id="forcedToggle">
+      <input type="checkbox" id="setForced"> Споты с автоолл-ином
+    </label>
+    <p class="hint" id="forcedHint"></p>
+
+    <label class="field-label">Сложность</label>
+    <div class="seg" id="setDifficulty0">
+      <button data-v="natural">Как в игре (все руки)</button>
+    </div>
+    <div class="seg" id="setDifficulty">
+      <button data-v="easy">Легко</button><button data-v="medium">Средне</button>
+      <button data-v="hard">Сложно</button><button data-v="mix">Микс</button>
+    </div>
+    <p class="hint" id="difficultyHint"></p>
+
+    <label class="field-label">Модель</label>
+    <select id="setModel">
+      <option value="hrc">Как HRC: FGS-1 + баунти</option>
+      <option value="bounty">ICM + баунти + будущие баунти</option>
+      <option value="bounty-now">ICM + баунти за нокаут</option>
+      <option value="icm">Чистый ICM (без баунти)</option>
+    </select>
+    <p class="hint" id="modelHint"></p>
+
+    <label class="toggle" id="overcallsToggle">
+      <input type="checkbox" id="setOvercalls"> Оверколлы
+    </label>
+    <p class="hint" id="overcallsHint"></p>
+
+    <label class="toggle">
+      <input type="checkbox" id="setCovers"> Показывать, кто кого покрывает
+    </label>
+
+    <div class="hotkeys">
+      <div><kbd>F</kbd> фолд</div><div><kbd>A</kbd> или правый клик по столу — пуш</div><div><kbd>Space</kbd> следующая</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="table-wrap">
+      <div class="felt" id="felt">
+        <div class="pot" id="pot"></div>
+      </div>
+      <div class="loading hidden" id="loading"><div>Солвер считает…<small id="loadingHint"></small></div></div>
+    </div>
+
+    <div class="actions">
+      <div class="question" id="question"></div>
+      <div class="buttons">
+        <button class="btn fold" id="btnFold">Фолд <kbd>F</kbd></button>
+        <button class="btn play" id="btnPlay">Пуш <kbd>A</kbd></button>
+        <button class="btn next hidden" id="btnNext">Следующая <kbd>Space</kbd></button>
+      </div>
+    </div>
+
+    <section class="panel result hidden" id="result">
+      <div class="result-head">
+        <div class="verdict" id="verdict"></div>
+        <div class="ev-table" id="evTable"></div>
+      </div>
+      <div class="result-grid">
+      <div class="grid-head">
+        <div class="grid-title" id="gridTitle"></div>
+        <div class="seg small" id="gridMode">
+          <button data-v="freq" class="active">Диапазон</button><button data-v="ev">EV</button>
+        </div>
+      </div>
+      <div class="grid" id="grid"></div>
+      <div class="grid-tip" id="gridTip">&nbsp;</div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="panel side">
+    <h2>Сессия</h2>
+    <div id="statsBox"></div>
+    <button class="link" id="btnReset">Сбросить статистику</button>
+    <h2>История</h2>
+    <ol class="history" id="history"></ol>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+<script src="upload.js"></script>
+<script src="stats.js"></script>
+<script src="mistakes.js"></script>
+<script src="opponents.js"></script>
+<script src="tabs.js"></script>
+</body>
+</html>
